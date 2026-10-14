@@ -1,0 +1,31 @@
+name: CI
+
+on: push
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # pycairo and manimpango ship no Linux wheels, so they build from source.
+      # Windows needs nothing: every dependency has a wheel there.
+      - name: Install cairo and pango headers
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libcairo2-dev libpango1.0-dev pkg-config
+
+      - uses: astral-sh/setup-uv@v10
+
+      - name: Install
+        run: uv sync --locked
+
+      - name: Typecheck
+        run: uv run mypy
+
+      # The fixture lesson renders at low quality except for one final-quality test.
+      - name: Test
+        run: uv run pytest
