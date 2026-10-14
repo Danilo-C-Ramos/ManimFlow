@@ -5,6 +5,7 @@ import io
 import json
 import sys
 from pathlib import Path
+from typing import Protocol
 
 from manimflow.plan import validate_plan
 from manimflow.render import render_scene
@@ -39,29 +40,37 @@ def main(argv: list[str] | None = None) -> int:
     return _render(args.lesson, args.scene, args.command, args.json)
 
 
+class _Report(Protocol):
+    errors: list[str]
+
+    @property
+    def ok(self) -> bool: ...
+
+    def to_dict(self) -> dict: ...
+
+
 def _render(lesson: Path, scene: str, mode: str, as_json: bool) -> int:
     report = render_scene(lesson, scene, mode)
-    if as_json:
-        print(json.dumps(report.to_dict(), indent=2))
-    else:
-        for path in report.files:
-            print(path)
-        if report.manim_output:
-            print(report.manim_output, file=sys.stderr)
-        for error in report.errors:
-            print(f"error: {error}", file=sys.stderr)
-    return 0 if report.ok else 1
+    details = [report.manim_output] if report.manim_output else []
+    return _finish(report, as_json, [str(path) for path in report.files], details)
 
 
 def _plan_validate(lesson: Path, as_json: bool) -> int:
     report = validate_plan(lesson)
+    return _finish(report, as_json, ["Plano válido."] if report.ok else [], [])
+
+
+def _finish(report: _Report, as_json: bool, lines: list[str], details: list[str]) -> int:
+    """Prints the report, as JSON or as text lines with details and errors on stderr."""
     if as_json:
         print(json.dumps(report.to_dict(), indent=2, ensure_ascii=False))
-    elif report.ok:
-        print("Plano válido.")
     else:
+        for line in lines:
+            print(line)
+        for detail in details:
+            print(detail, file=sys.stderr)
         for error in report.errors:
-            print(f"erro: {error}", file=sys.stderr)
+            print(f"error: {error}", file=sys.stderr)
     return 0 if report.ok else 1
 
 

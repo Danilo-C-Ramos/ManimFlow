@@ -63,7 +63,7 @@ def test_errors_without_json_go_to_stderr(manimflow, lesson):
     result = manimflow("plan", "validate", str(lesson))
 
     assert result.returncode != 0
-    assert "S2 não vem logo depois de S0" in result.stderr
+    assert result.stderr.startswith("error: Transição S0 → S2: S2 não vem logo depois de S0")
     assert result.stdout == ""
 
 

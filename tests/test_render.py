@@ -48,6 +48,8 @@ def test_json_report_lists_files_and_duration(manimflow, lesson):
     )
     assert report["duration_s"] > 0
     assert report["errors"] == []
+    # Accented lesson paths stay readable for the agent, as in the plan report.
+    assert "Aula Mínima" in result.stdout
 
 
 def test_failing_scene_exits_nonzero_with_manim_error_output(manimflow, lesson):
