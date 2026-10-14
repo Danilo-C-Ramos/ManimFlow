@@ -1,5 +1,9 @@
 import pytest
 
+from conftest import FIXTURES
+
+FIXTURE_FILES = sorted(p.name for p in (FIXTURES / "aula_minima").iterdir())
+
 INVALID_NAMES = [
     "../x",
     "..\\x",
@@ -28,7 +32,7 @@ def test_invalid_scene_name_is_rejected_before_rendering(manimflow, lesson, name
     assert any("scene name" in error for error in report["errors"])
     assert report["files"] == []
     # Nothing reached Manim or the file system.
-    assert sorted(p.name for p in lesson.iterdir()) == ["cenas.py"]
+    assert sorted(p.name for p in lesson.iterdir()) == FIXTURE_FILES
     assert list(lesson.parent.iterdir()) == [lesson]
 
 
@@ -36,7 +40,7 @@ def test_flag_as_scene_without_separator_is_a_usage_error(manimflow, lesson):
     result = manimflow("preview", str(lesson), "--flag")
 
     assert result.returncode != 0
-    assert sorted(p.name for p in lesson.iterdir()) == ["cenas.py"]
+    assert sorted(p.name for p in lesson.iterdir()) == FIXTURE_FILES
 
 
 def test_missing_lesson_folder_is_reported(manimflow, tmp_path):

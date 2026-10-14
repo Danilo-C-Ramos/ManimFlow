@@ -1,0 +1,6 @@
+transicoes:
+  - de: S0
+    para: S1
+    descricao: O quadrado anda para a direita.
+    duracao: 0.5
+    cena: T01

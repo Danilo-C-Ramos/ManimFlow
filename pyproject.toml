@@ -13,13 +13,18 @@ license = "MIT"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "manim>=0.22,<0.23",
+    "pyyaml>=6,<7",
 ]
 
 [project.scripts]
 manimflow = "manimflow.cli:main"
 
 [dependency-groups]
-dev = ["mypy>=1.13", "pytest>=8"]
+dev = [
+    "mypy>=1.13",
+    "pytest>=8",
+    "types-pyyaml>=6",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/manimflow"]
@@ -29,4 +34,6 @@ testpaths = ["tests"]
 
 [tool.mypy]
 files = ["src", "tests"]
+# Lesson code belongs to the teacher and is checked by rendering it, not by mypy.
+exclude = ["src/manimflow/exemplos/"]
 ignore_missing_imports = true

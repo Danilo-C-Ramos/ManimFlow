@@ -4,11 +4,13 @@ import subprocess
 import sys
 import sysconfig
 from dataclasses import dataclass
+from importlib.resources import files
 from pathlib import Path
 
 import pytest
 
 FIXTURES = Path(__file__).parent / "fixtures"
+EXAMPLE = Path(str(files("manimflow"))) / "exemplos" / "relatividade"
 
 
 @dataclass
@@ -50,4 +52,12 @@ def lesson(tmp_path) -> Path:
     """A temporary copy of the minimal fixture lesson."""
     path = tmp_path / "Aula Mínima"
     shutil.copytree(FIXTURES / "aula_minima", path)
+    return path
+
+
+@pytest.fixture
+def example(tmp_path) -> Path:
+    """A temporary copy of the bundled relativity example lesson."""
+    path = tmp_path / "Relatividade - herói e espelho"
+    shutil.copytree(EXAMPLE, path)
     return path
