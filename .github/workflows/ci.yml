@@ -18,7 +18,7 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libcairo2-dev libpango1.0-dev pkg-config
 
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.3.0  # no floating major tags since v8
 
       - name: Install
         run: uv sync --locked
