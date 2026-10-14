@@ -18,6 +18,7 @@ from manimflow.agent import (
     CommandStarted,
     Event,
     FileChanged,
+    LoginFailed,
     ModelSettings,
 )
 
@@ -38,19 +39,31 @@ MODEL_SETTINGS = ModelSettings(model="gpt-5-codex", effort="medium")
 
 
 class ScriptedAgent:
-    def __init__(self, scenario: Scenario, delay: float = 0.0) -> None:
+    def __init__(
+        self,
+        scenario: Scenario,
+        delay: float = 0.0,
+        logged_in: bool = True,
+        login_failure: str | None = None,
+    ) -> None:
         self.scenario = scenario
         # Seconds between steps, so the demo streams at a visible pace.
         self.delay = delay
+        self._account = ACCOUNT if logged_in else Account(logged_in=False)
+        # When set, every login attempt fails with this message.
+        self._login_failure = login_failure
 
     async def start_session(self, lesson: Path) -> "ScriptedSession":
         return ScriptedSession(lesson, iter(self.scenario), self.delay)
 
     async def account(self) -> Account:
-        return ACCOUNT
+        return self._account
 
     async def login(self, api_key: str | None = None) -> Account:
-        return ACCOUNT
+        if self._login_failure is not None:
+            raise LoginFailed(self._login_failure)
+        self._account = ACCOUNT if api_key is None else Account(logged_in=True, method="api_key")
+        return self._account
 
     async def model_settings(self) -> ModelSettings:
         return MODEL_SETTINGS

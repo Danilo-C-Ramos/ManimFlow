@@ -9,6 +9,7 @@ no network and no approval prompts.
 import asyncio
 import logging
 import os
+import sys
 import sysconfig
 import webbrowser
 from collections.abc import AsyncIterator, Callable, Sequence
@@ -64,6 +65,20 @@ THREAD_CONFIG: JsonObject = {
     },
     "web_search": "disabled",
 }
+
+
+def default_codex_home() -> Path:
+    """ManimFlow's own Codex home, kept apart from any Codex the teacher installed.
+
+    See docs/adr/0001-manimflow-has-its-own-codex-home.md.
+    """
+    if sys.platform == "win32":
+        base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support"
+    else:
+        base = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
+    return base / "ManimFlow" / "codex"
 
 
 class CodexAgent:

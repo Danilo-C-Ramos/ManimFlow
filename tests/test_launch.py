@@ -26,6 +26,19 @@ def test_serves_only_on_localhost_and_opens_the_browser(monkeypatch, tmp_path):
     assert isinstance(options["port"], int)
 
 
+async def test_the_app_signs_in_to_codex_in_its_own_codex_home(monkeypatch, tmp_path):
+    data = tmp_path / "dados"
+    monkeypatch.setenv("LOCALAPPDATA", str(data))
+    monkeypatch.setenv("XDG_DATA_HOME", str(data))
+    root, _ = launch(monkeypatch, tmp_path)
+
+    async with user_simulation(root=root) as user:
+        await user.open("/")
+        await user.should_see("Entrar com o ChatGPT")
+
+    assert (data / "ManimFlow" / "codex").is_dir()
+
+
 async def test_demo_opens_a_copy_of_the_bundled_example_with_the_scripted_agent(monkeypatch, tmp_path):
     bundled = sorted(path.name for path in EXAMPLE.iterdir())
     root, _ = launch(monkeypatch, tmp_path, "--demo")

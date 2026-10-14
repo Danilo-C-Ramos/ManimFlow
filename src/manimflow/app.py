@@ -8,7 +8,7 @@ from collections.abc import Awaitable, Callable
 from importlib.resources import files
 from pathlib import Path
 
-from nicegui import ui
+from nicegui import app, ui
 
 from manimflow.agent import (
     Agent,
@@ -18,6 +18,7 @@ from manimflow.agent import (
     CommandStarted,
     Event,
     FileChanged,
+    LoginFailed,
     Session,
 )
 
@@ -31,6 +32,7 @@ _FILE_CHANGES = {"added": "Arquivo criado", "modified": "Arquivo alterado", "del
 
 def serve(agent: Agent, lesson: Path) -> None:
     """Serves the lesson screen on localhost only and opens it in the default browser."""
+    app.on_shutdown(agent.close)
     ui.run(
         lesson_page(agent, lesson),
         host="127.0.0.1",
@@ -63,9 +65,78 @@ def lesson_page(agent: Agent, lesson: Path) -> Callable[[], Awaitable[None]]:
         ui.page_title(f"{lesson.name} · ManimFlow")
         with ui.header().classes("items-center"):
             ui.label(lesson.name).classes("text-lg")
-        Chat(await agent.start_session(lesson))
+        body = ui.column().classes("w-full")
+
+        async def open_chat() -> None:
+            session = await agent.start_session(lesson)
+            body.clear()
+            with body:
+                Chat(session)
+
+        if (await agent.account()).logged_in:
+            await open_chat()
+        else:
+            with body:
+                SignIn(agent, on_signed_in=open_chat)
 
     return page
+
+
+class SignIn:
+    """Signs the teacher in with ChatGPT or an API key before the chat opens."""
+
+    def __init__(self, agent: Agent, on_signed_in: Callable[[], Awaitable[None]]) -> None:
+        self.agent = agent
+        self.on_signed_in = on_signed_in
+        with ui.card().classes("mx-auto mt-16 w-full max-w-md items-stretch gap-4"):
+            ui.label("Entre para conversar com o agente").classes("text-lg")
+            ui.label("Use a sua conta do ChatGPT Plus ou Pro, ou uma chave de API da OpenAI.").classes(
+                "text-grey-7"
+            )
+            self.chatgpt = ui.button("Entrar com o ChatGPT", on_click=self.with_chatgpt)
+            self.waiting = ui.label("Termine o login na aba do navegador que acabou de abrir.").classes(
+                "text-grey-7"
+            )
+            self.waiting.set_visibility(False)
+            ui.separator()
+            self.key = (
+                ui.input("Chave de API", password=True, password_toggle_button=True)
+                .props("outlined dense")
+                .mark("api-key")
+            )
+            self.key_button = ui.button("Usar chave de API", on_click=self.with_api_key).props("outline")
+            self.error = ui.label().classes("text-negative")
+            self.error.set_visibility(False)
+
+    async def with_chatgpt(self) -> None:
+        await self._login(None)
+
+    async def with_api_key(self) -> None:
+        await self._login(self.key.value or "")
+
+    async def _login(self, api_key: str | None) -> None:
+        self._set_busy(True, waiting_for_browser=api_key is None)
+        self.error.set_visibility(False)
+        try:
+            await self.agent.login(api_key)
+        except LoginFailed as failure:
+            self._fail(str(failure))
+            return
+        except Exception:
+            logger.exception("Login failed")
+            self._fail("Não foi possível entrar agora. Tente de novo.")
+            return
+        await self.on_signed_in()
+
+    def _fail(self, message: str) -> None:
+        self._set_busy(False)
+        self.error.set_text(message)
+        self.error.set_visibility(True)
+
+    def _set_busy(self, busy: bool, waiting_for_browser: bool = False) -> None:
+        self.chatgpt.set_enabled(not busy)
+        self.key_button.set_enabled(not busy)
+        self.waiting.set_visibility(busy and waiting_for_browser)
 
 
 class Chat:

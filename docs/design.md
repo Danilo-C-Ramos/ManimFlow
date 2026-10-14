@@ -67,6 +67,7 @@ The main seam is the `manimflow` CLI. The agent calls it through its shell, and 
 - Codex app-server, driven by the `openai-codex` Python SDK.
 - Wrapped behind a thin `Agent` interface, so the engine can later be swapped (own loop, ACP client) without touching the UI.
 - Sandbox: `workspace_write` scoped to the lesson folder, network off, and no approval prompts for commands inside the folder.
+- ManimFlow runs Codex in its own Codex home, apart from any Codex the teacher installed. See [ADR 0001](adr/0001-manimflow-has-its-own-codex-home.md).
 - If the agent needs a new Python package, it stops and tells the user. Needing new libraries is a sign it is on the wrong path.
 
 ### 6.3 UI

@@ -35,6 +35,10 @@ packages = ["src/manimflow"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# The smoke test drives the real Codex agent with a signed-in account, so it
+# only runs on request: `uv run pytest -m smoke`.
+addopts = ["-m", "not smoke"]
+markers = ["smoke: drives the real Codex agent; needs a signed-in account and spends quota"]
 
 [tool.mypy]
 files = ["src", "tests"]
