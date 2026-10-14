@@ -62,6 +62,10 @@ class Account:
     email: str | None = None
 
 
+class LoginFailed(Exception):
+    """Signing in failed; the message explains why, for the teacher."""
+
+
 @dataclass(frozen=True)
 class ModelSettings:
     model: str
@@ -84,9 +88,16 @@ class Agent(Protocol):
     async def account(self) -> Account: ...
 
     async def login(self, api_key: str | None = None) -> Account:
-        """Signs in with the API key, or with ChatGPT in the browser when there is none."""
+        """Signs in with the API key, or with ChatGPT in the browser when there is none.
+
+        Raises LoginFailed when the teacher can't be signed in.
+        """
         ...
 
     async def model_settings(self) -> ModelSettings: ...
 
     async def set_model_settings(self, settings: ModelSettings) -> None: ...
+
+    async def close(self) -> None:
+        """Stops the engine when the app shuts down."""
+        ...

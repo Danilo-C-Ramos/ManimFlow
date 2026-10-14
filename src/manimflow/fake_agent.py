@@ -58,6 +58,9 @@ class ScriptedAgent:
     async def set_model_settings(self, settings: ModelSettings) -> None:
         pass
 
+    async def close(self) -> None:
+        pass
+
 
 class ScriptedSession:
     def __init__(self, lesson: Path, turns: Iterator[list[Step]], delay: float) -> None:
