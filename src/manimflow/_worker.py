@@ -1,19 +1,27 @@
 """Renders one scene inside its own process, so lesson code can't crash the CLI.
 
-Usage: python -m manimflow._worker <scenes_file> <scene> <quality> <media_dir> <out_dir>
+Usage: python -m manimflow._worker <scenes_file> <scene> <quality> <media_dir> <out_dir> [settings]
 
 Writes <out_dir>/<scene>.png (the scene's final frame) and, when the scene
-plays any animation, <out_dir>/<scene>.mp4.
+plays any animation, its video: <out_dir>/<scene>.mp4, or <out_dir>/<scene>.mov
+when the settings ask for a lossless one.
+
+`settings` is a JSON object that overrides what the quality and the lesson's own
+code set: "pixel_width" and "pixel_height" (both or neither), "frame_rate",
+"background_color" and "lossless".
 """
 
 import importlib.util
+import json
 import shutil
 import sys
 from pathlib import Path
 
 
-def main(scenes_file: str, scene_name: str, quality: str, media_dir: str, out_dir: str) -> None:
-    from manim import Scene, tempconfig
+def main(
+    scenes_file: str, scene_name: str, quality: str, media_dir: str, out_dir: str, settings: str = "{}"
+) -> None:
+    from manim import Scene, config, tempconfig
     from manim.renderer.cairo_renderer import CairoRenderer
     from PIL import Image
 
@@ -27,6 +35,8 @@ def main(scenes_file: str, scene_name: str, quality: str, media_dir: str, out_di
         assert spec is not None and spec.loader is not None
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
+        # After the lesson's module, which may set config itself (the example sets its background).
+        _apply(json.loads(settings), config)
 
         scene_class = getattr(module, scene_name, None)
         if not (isinstance(scene_class, type) and issubclass(scene_class, Scene)):
@@ -44,7 +54,29 @@ def main(scenes_file: str, scene_name: str, quality: str, media_dir: str, out_di
         renderer.update_frame(scene)
         Image.fromarray(renderer.get_frame()).save(out / f"{scene_name}.png")
         if renderer.num_plays:
-            shutil.copyfile(renderer.file_writer.movie_file_path, out / f"{scene_name}.mp4")
+            movie = Path(renderer.file_writer.movie_file_path)
+            shutil.copyfile(movie, out / f"{scene_name}{movie.suffix}")
+
+
+def _apply(settings: dict, config) -> None:
+    if "pixel_width" in settings:
+        width, height = settings["pixel_width"], settings["pixel_height"]
+        # A new aspect ratio widens or heightens the lesson's frame, so nothing drawn
+        # for it is cut off.
+        if width / height >= config.frame_width / config.frame_height:
+            config.frame_width = config.frame_height * width / height
+        else:
+            config.frame_height = config.frame_width * height / width
+        config.pixel_width, config.pixel_height = width, height
+    if "frame_rate" in settings:
+        config.frame_rate = settings["frame_rate"]
+    if "background_color" in settings:
+        config.background_color = settings["background_color"]
+    if settings.get("lossless"):
+        # Run-length coded RGB: exact frames, small for flat drawings.
+        config.format = "mov"
+        config.video_codec = "qtrle"
+        config.pixel_format = "rgb24"
 
 
 if __name__ == "__main__":

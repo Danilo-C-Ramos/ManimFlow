@@ -14,6 +14,7 @@ from manimflow.continuity import (
     check_continuity,
     extract_frames,
 )
+from manimflow.export import PRESETS, export_lesson
 from manimflow.plan import validate_plan
 from manimflow.render import render_scene
 
@@ -52,6 +53,23 @@ def main(argv: list[str] | None = None) -> int:
         help=f"images match when under this fraction of pixels differ (default: {MAX_FRACTION})",
     )
 
+    export = commands.add_parser(
+        "export",
+        help="render the lesson at final quality into slide-ready files",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="presets:\n"
+        + "\n".join(
+            f"  {p.name:<12} {p.help} ({p.resolution}p, {p.fps} fps)" for p in PRESETS.values()
+        ),
+    )
+    export.add_argument("lesson", type=Path, help="lesson folder")
+    export.add_argument("preset", choices=PRESETS, help="what the files are for")
+    export.add_argument(
+        "--resolution", type=_resolution, help="height in pixels, such as 720 or 1080"
+    )
+    export.add_argument("--fps", type=_fps, help="frames per second")
+    export.add_argument("--json", action="store_true", help="print a JSON report")
+
     plan = commands.add_parser("plan", help="work with a lesson's plano.yaml")
     plan_commands = plan.add_subparsers(dest="plan_command", required=True)
     validate = plan_commands.add_parser("validate", help="check a lesson's plano.yaml")
@@ -66,6 +84,8 @@ def main(argv: list[str] | None = None) -> int:
             stream.reconfigure(encoding="utf-8")
     if args.command == "plan":
         return _plan_validate(args.lesson, args.json)
+    if args.command == "export":
+        return _export(args.lesson, args.preset, args.resolution, args.fps, args.json)
     if args.command == "frames":
         return _frames(args.lesson, args.transitions, args.final, args.json)
     if args.command == "check-continuity":
@@ -100,6 +120,20 @@ def _fraction(text: str) -> float:
     return value
 
 
+def _resolution(text: str) -> int:
+    value = int(text)
+    if not (16 <= value <= 2160 and value % 2 == 0):
+        raise argparse.ArgumentTypeError("must be an even number of pixels from 16 to 2160")
+    return value
+
+
+def _fps(text: str) -> int:
+    value = int(text)
+    if not 1 <= value <= 120:
+        raise argparse.ArgumentTypeError("must be from 1 to 120")
+    return value
+
+
 class _Report(Protocol):
     errors: list[str]
 
@@ -111,6 +145,12 @@ class _Report(Protocol):
 
 def _render(lesson: Path, scene: str, mode: str, as_json: bool) -> int:
     report = render_scene(lesson, scene, mode)
+    details = [report.manim_output] if report.manim_output else []
+    return _finish(report, as_json, [str(path) for path in report.files], details)
+
+
+def _export(lesson: Path, preset: str, resolution: int | None, fps: int | None, as_json: bool) -> int:
+    report = export_lesson(lesson, preset, resolution, fps)
     details = [report.manim_output] if report.manim_output else []
     return _finish(report, as_json, [str(path) for path in report.files], details)
 
