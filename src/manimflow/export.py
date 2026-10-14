@@ -20,6 +20,8 @@ FINAL_QUALITY = QUALITIES["render"][0]
 # GIF frame delays are whole hundredths of a second, and browsers slow down anything
 # under two hundredths to a tenth of a second.
 GIF_MAX_FPS = 50
+# What an export writes, and so what the next export of the preset replaces.
+EXPORTED_SUFFIXES = {".png", ".mp4", ".gif"}
 
 
 @dataclass(frozen=True)
@@ -29,6 +31,8 @@ class Settings:
     resolution: int
     fps: int
     aspect_ratio: tuple[int, int]
+    # "#rrggbb", or None for the lesson's own background.
+    background: str | None = None
 
     @property
     def size(self) -> tuple[int, int]:
@@ -38,7 +42,10 @@ class Settings:
 
     def for_worker(self, lossless: bool) -> dict:
         width, height = self.size
-        return {"pixel_width": width, "pixel_height": height, "frame_rate": self.fps, "lossless": lossless}
+        settings: dict = {"pixel_width": width, "pixel_height": height, "frame_rate": self.fps, "lossless": lossless}
+        if self.background:
+            settings["background_color"] = self.background
+        return settings
 
     def to_dict(self) -> dict:
         width, height = self.size
@@ -46,6 +53,7 @@ class Settings:
             "resolution": self.resolution,
             "fps": self.fps,
             "aspect_ratio": "{}:{}".format(*self.aspect_ratio),
+            "background": self.background,
             "width": width,
             "height": height,
         }
@@ -85,15 +93,18 @@ def export_lesson(
     resolution: int | None = None,
     fps: int | None = None,
     aspect_ratio: tuple[int, int] | None = None,
+    background: str | None = None,
 ) -> ExportReport:
     """Renders the lesson at final quality and writes the preset's files, in plan order, to
-    the preset's folder in the lesson's output folder. Settings left as None keep the preset's."""
+    the preset's folder in the lesson's output folder. Settings left as None keep the preset's;
+    `background` is a "#rrggbb" color."""
     started = time.perf_counter()
     chosen = PRESETS[preset]
     settings = Settings(
         resolution=resolution or chosen.resolution,
         fps=fps or chosen.fps,
         aspect_ratio=aspect_ratio or chosen.aspect_ratio,
+        background=background,
     )
     report = ExportReport(lesson=lesson.absolute(), preset=preset, settings=settings)
     if chosen.max_fps and settings.fps > chosen.max_fps:
@@ -133,6 +144,11 @@ def _export_into(report: ExportReport) -> None:
             return
 
         folder.mkdir(parents=True, exist_ok=True)
+        # The previous export may have had more states, or another lesson name; the
+        # teacher's own files in the folder stay.
+        for old in folder.iterdir():
+            if old.is_file() and old.suffix.lower() in EXPORTED_SUFFIXES:
+                old.unlink()
         for produced in sorted(exported.iterdir()):
             target = folder / produced.name
             shutil.move(produced, target)

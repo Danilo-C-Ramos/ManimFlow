@@ -1,6 +1,11 @@
+import shutil
+
 import av
 import numpy as np
+import pytest
 from PIL import Image
+
+from conftest import FIXTURES
 
 # Exports render at final quality; tests shrink them so the fixture renders fast.
 SMALL = ("--resolution", "144", "--fps", "10")
@@ -182,3 +187,107 @@ def color_tables(path) -> list[bytes]:
         else:
             raise ValueError(f"unexpected GIF block {data[at]:#x} in {path}")
     return tables
+
+
+def corner(image: Image.Image) -> tuple[int, ...]:
+    return tuple(np.asarray(image.convert("RGB"))[2, 2].tolist())
+
+
+def test_background_applies_to_every_output(manimflow, lesson):
+    # Rendered first with the lesson's own black background, so a cached animation
+    # with the old background would show up below.
+    export(manimflow, lesson, "powerpoint", *SMALL)
+
+    report = export(manimflow, lesson, "powerpoint", *SMALL, "--background", "#FFCC00")
+    gifs = export(manimflow, lesson, "web", *SMALL, "--background", "gold")
+
+    assert report["settings"]["background"] == "#ffcc00"
+    folder = lesson / "saida" / "powerpoint"
+    for name in ("01_S0.png", "03_S1.png"):
+        with Image.open(folder / name) as image:
+            assert corner(image) == (255, 204, 0), name
+    for frame in video_frames(folder / "02_S0-S1.mp4"):
+        assert all(abs(a - b) <= 6 for a, b in zip(corner(frame), (255, 204, 0)))
+    for path in gifs["files"]:
+        with Image.open(path) as image:
+            # Pillow's "gold" is #ffd700.
+            assert corner(image) == (255, 215, 0), path
+
+
+def square_width(image: Image.Image) -> int:
+    pixels = np.asarray(image.convert("RGB"), dtype=np.int16)
+    columns = np.nonzero((pixels.max(axis=2) > 40).any(axis=0))[0]
+    return int(columns.max() - columns.min())
+
+
+def test_aspect_ratio_applies_to_every_output_and_keeps_the_whole_drawing(manimflow, lesson):
+    wide = export(manimflow, lesson, "powerpoint", *SMALL)
+    with Image.open(wide["files"][0]) as image:
+        wide_square = square_width(image)
+
+    report = export(manimflow, lesson, "powerpoint", *SMALL, "--aspect-ratio", "4:3")
+
+    assert report["settings"]["aspect_ratio"] == "4:3"
+    folder = lesson / "saida" / "powerpoint"
+    for name in ("01_S0.png", "03_S1.png"):
+        assert image_size(folder / name) == (192, 144), name
+    assert video_frames(folder / "02_S0-S1.mp4")[0].size == (192, 144)
+    # The 16:9 drawing fits across the narrower frame, so it shows at 3/4 of the size
+    # instead of losing its sides.
+    with Image.open(folder / "01_S0.png") as image:
+        assert abs(square_width(image) / wide_square - 0.75) < 0.1
+
+
+@pytest.mark.parametrize("ratio", ["4x3", "0:9", "5:1"])
+def test_invalid_aspect_ratio_is_rejected(manimflow, lesson, ratio):
+    result = manimflow("export", str(lesson), "powerpoint", "--aspect-ratio", ratio)
+
+    assert result.returncode != 0
+    assert "--aspect-ratio" in result.stderr and "width:height" in result.stderr
+
+
+def test_exports_render_at_final_quality_by_default(manimflow, lesson):
+    report = export(manimflow, lesson, "beamer")
+
+    assert report["settings"] == {
+        "resolution": 1080,
+        "fps": 60,
+        "aspect_ratio": "16:9",
+        "background": None,
+        "width": 1920,
+        "height": 1080,
+    }
+    for path in report["files"]:
+        assert image_size(path) == (1920, 1080), path
+    assert report["duration_s"] > 0
+    assert report["errors"] == []
+
+
+def test_export_replaces_the_previous_export_of_the_preset(manimflow, lesson):
+    add_second_transition(lesson)
+    export(manimflow, lesson, "powerpoint", *SMALL)
+    folder = lesson / "saida" / "powerpoint"
+    (folder / "notas.txt").write_text("minhas notas", encoding="utf-8")
+    # Back to the fixture's plan: S2 and its transition are gone.
+    shutil.copyfile(FIXTURES / "aula_minima" / "plano.yaml", lesson / "plano.yaml")
+
+    report = export(manimflow, lesson, "powerpoint", *SMALL)
+
+    exported = [folder / "01_S0.png", folder / "02_S0-S1.mp4", folder / "03_S1.png"]
+    assert report["files"] == [str(path) for path in exported]
+    assert sorted(folder.iterdir()) == sorted([*exported, folder / "notas.txt"])
+
+
+def test_failed_export_keeps_the_previous_one(manimflow, lesson):
+    export(manimflow, lesson, "beamer", *SMALL)
+    before = sorted((lesson / "saida" / "beamer").iterdir())
+    scenes = lesson / "cenas.py"
+    scenes.write_text(scenes.read_text(encoding="utf-8") + "\nraise ValueError('quebrada')\n", encoding="utf-8")
+
+    result = manimflow("export", str(lesson), "beamer", *SMALL, "--json")
+
+    assert result.returncode != 0
+    assert result.report["files"] == []
+    assert any("quebrada" in error for error in result.report["errors"])
+    assert "Traceback" in result.report["manim_output"]
+    assert sorted((lesson / "saida" / "beamer").iterdir()) == before

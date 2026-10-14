@@ -35,6 +35,7 @@ jobs:
       - name: Typecheck
         run: uv run mypy
 
-      # The fixture lesson renders at low quality except for one final-quality test.
+      # The fixture lesson renders at low quality, and exports at 144p, except for a
+      # few final-quality tests.
       - name: Test
         run: uv run pytest

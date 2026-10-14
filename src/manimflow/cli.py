@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 from typing import Protocol
 
+from PIL import ImageColor
+
 from manimflow.continuity import (
     CHANNEL_DIFF,
     MAX_FRACTION,
@@ -68,6 +70,14 @@ def main(argv: list[str] | None = None) -> int:
         "--resolution", type=_resolution, help="height in pixels, such as 720 or 1080"
     )
     export.add_argument("--fps", type=_fps, help="frames per second")
+    export.add_argument(
+        "--aspect-ratio", type=_aspect_ratio, help="width:height, such as 16:9 or 4:3"
+    )
+    export.add_argument(
+        "--background",
+        type=_color,
+        help="background color, such as #ffffff or white (default: the lesson's own)",
+    )
     export.add_argument("--json", action="store_true", help="print a JSON report")
 
     plan = commands.add_parser("plan", help="work with a lesson's plano.yaml")
@@ -85,7 +95,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "plan":
         return _plan_validate(args.lesson, args.json)
     if args.command == "export":
-        return _export(args.lesson, args.preset, args.resolution, args.fps, args.json)
+        return _export(
+            args.lesson, args.preset, args.resolution, args.fps, args.aspect_ratio, args.background, args.json
+        )
     if args.command == "frames":
         return _frames(args.lesson, args.transitions, args.final, args.json)
     if args.command == "check-continuity":
@@ -134,6 +146,22 @@ def _fps(text: str) -> int:
     return value
 
 
+def _aspect_ratio(text: str) -> tuple[int, int]:
+    across, _, down = text.partition(":")
+    valid = across.isdigit() and down.isdigit() and int(down) > 0
+    if not (valid and 1 / 4 <= int(across) / int(down) <= 4):
+        raise argparse.ArgumentTypeError("must be width:height, such as 16:9, from 1:4 to 4:1")
+    return int(across), int(down)
+
+
+def _color(text: str) -> str:
+    try:
+        red, green, blue = ImageColor.getrgb(text)[:3]
+    except ValueError:
+        raise argparse.ArgumentTypeError("must be a color such as #ffffff or white") from None
+    return f"#{red:02x}{green:02x}{blue:02x}"
+
+
 class _Report(Protocol):
     errors: list[str]
 
@@ -149,8 +177,16 @@ def _render(lesson: Path, scene: str, mode: str, as_json: bool) -> int:
     return _finish(report, as_json, [str(path) for path in report.files], details)
 
 
-def _export(lesson: Path, preset: str, resolution: int | None, fps: int | None, as_json: bool) -> int:
-    report = export_lesson(lesson, preset, resolution, fps)
+def _export(
+    lesson: Path,
+    preset: str,
+    resolution: int | None,
+    fps: int | None,
+    aspect_ratio: tuple[int, int] | None,
+    background: str | None,
+    as_json: bool,
+) -> int:
+    report = export_lesson(lesson, preset, resolution, fps, aspect_ratio, background)
     details = [report.manim_output] if report.manim_output else []
     return _finish(report, as_json, [str(path) for path in report.files], details)
 
