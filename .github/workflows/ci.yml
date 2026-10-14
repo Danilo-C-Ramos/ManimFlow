@@ -25,7 +25,7 @@ jobs:
       - name: Install Manim's LaTeX packages
         run: |
           tlmgr update --self
-          tlmgr install standalone preview doublestroke ms setspace rsfs relsize ragged2e fundus-calligra microtype wasysym physics dvisvgm jknapltx wasy cm-super babel-english gnu-freefont mathastext cbfonts-fd
+          tlmgr install standalone preview doublestroke setspace rsfs relsize ragged2e fundus-calligra microtype wasysym physics dvisvgm jknapltx wasy cm-super babel-english gnu-freefont mathastext cbfonts-fd
 
       - uses: astral-sh/setup-uv@v10.3.0  # no floating major tags since v8
 
