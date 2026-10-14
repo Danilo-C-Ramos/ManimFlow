@@ -132,10 +132,14 @@ def _fraction(text: str) -> float:
     return value
 
 
+# 4K comes in v0.2 (docs/design.md).
+MAX_RESOLUTION = 1440
+
+
 def _resolution(text: str) -> int:
     value = int(text)
-    if not (16 <= value <= 2160 and value % 2 == 0):
-        raise argparse.ArgumentTypeError("must be an even number of pixels from 16 to 2160")
+    if not (16 <= value <= MAX_RESOLUTION and value % 2 == 0):
+        raise argparse.ArgumentTypeError(f"must be an even number of pixels from 16 to {MAX_RESOLUTION}")
     return value
 
 

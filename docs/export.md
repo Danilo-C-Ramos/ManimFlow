@@ -21,8 +21,8 @@ Every preset defaults to 16:9 and to the lesson's own background.
 
 These flags override the preset's defaults for every file it writes.
 
-- `--resolution` is the height in pixels, an even number from 16 to 2160. The width follows from the aspect ratio and is rounded to an even number, as video needs.
-- `--fps` sets the frames per second, from 1 to 120. The `web` preset stops at 50. GIF frame delays are whole hundredths of a second, and browsers slow anything shorter than two hundredths down to a tenth.
+- `--resolution` is the height in pixels, an even number from 16 to 1440. 4K comes in v0.2. The width follows from the aspect ratio and is rounded to an even number, as video needs.
+- `--fps` sets the frames per second, from 1 to 120. The `web` preset stops at 50. GIF frame delays are whole hundredths of a second, and browsers slow anything shorter than two hundredths down to a tenth. Rates that don't divide 100, such as 30, get delays that alternate (30, 40, 30 ms), which can make motion a little uneven. 25 and 50 play evenly.
 - `--aspect-ratio` takes `width:height`, from 1:4 to 4:1. A new ratio widens or heightens the lesson's frame, so the drawing is never cropped. At 4:3, a lesson drawn for 16:9 keeps its full width and gets more room above and below.
 - `--background` takes a color such as `#ffffff` or `white`. It overrides `config.background_color` in `cenas.py`, but not a scene that sets `self.camera.background_color` in `construct()`.
 
@@ -51,7 +51,7 @@ Every GIF of the lesson has only that palette as its global color table, with no
 
 ## Whole-lesson video
 
-The `video` preset joins the transitions in plan order with ffmpeg's concat demuxer, as Manim joins the animations of one scene. All transitions are rendered with the same settings, so their streams join without re-encoding and lose no quality. A lesson with no transitions has no video, which is an error.
+The `video` preset joins the transitions in plan order with ffmpeg's concat demuxer, as Manim joins the animations of one scene. All transitions are rendered with the same settings, so their streams join without re-encoding and lose no quality. A lesson with no transitions has no video, which is an error. The video has no sound: the join copies only the picture, so a scene's `add_sound` is lost there. The `powerpoint` MP4s keep it.
 
 ## Report
 

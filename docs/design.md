@@ -113,7 +113,7 @@ Aulas Manim/
     fisica.py                physics only; exposes equacoes()
     cenas.py                 drawing only, derived from fisica.py
     test_fisica.py           maintained by the agent
-    saida/                   png/, mp4/, gif/
+    saida/                   png/, mp4/ from render; powerpoint/, web/, beamer/, video/ from export
     .git/                    local only, managed by ManimFlow
 ```
 
@@ -173,7 +173,7 @@ Each preset has editable fields:
 | Beamer / PDF | PNG per state |
 | Whole-lesson video | all transitions concatenated (ffmpeg `concat`) |
 
-Editable fields: resolution, fps, background and aspect ratio. Alpha channel output (MOV/WebM) and 4K come in v0.2.
+Editable fields: resolution, fps, background and aspect ratio. Alpha channel output (MOV/WebM) and 4K come in v0.2. Details: `docs/export.md`.
 
 ### 6.10 Installation
 

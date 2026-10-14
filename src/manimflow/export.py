@@ -201,7 +201,7 @@ def _write_video(slides: list[Slide], renders: Path, exported: Path, report: Exp
     if not slides:
         report.errors.append("The plan has no transitions to put in a video")
         return
-    videos = [_transition_video(slide, renders, ".mp4", report) for slide in slides]
+    videos = [_transition_video(slide, renders, ".mp4", report) for slide in slides if isinstance(slide, Transition)]
     if report.errors:
         return
     _concatenate([video for video in videos if video], exported / f"{report.lesson.name}.mp4")
@@ -297,8 +297,7 @@ def _write_gif(frames, palette: _Palette, fps: int, target: Path) -> np.ndarray:
     return last
 
 
-def _transition_video(slide: Slide, renders: Path, suffix: str, report: ExportReport) -> Path | None:
-    assert isinstance(slide, Transition)
+def _transition_video(slide: Transition, renders: Path, suffix: str, report: ExportReport) -> Path | None:
     video = renders / f"{slide.scene}{suffix}"
     if video.is_file():
         return video
@@ -350,20 +349,42 @@ PRESETS = {
     preset.name: preset
     for preset in [
         Preset(
-            "powerpoint", "PowerPoint: a PNG per state and an MP4 per transition", 1080, 60, True, True, _write_files
+            "powerpoint",
+            "PowerPoint: a PNG per state and an MP4 per transition",
+            resolution=1080,
+            fps=60,
+            states=True,
+            transitions=True,
+            write=_write_files,
         ),
         Preset(
             "web",
             "PowerPoint web / Google Slides: a GIF per transition and a static GIF per state",
-            720,
-            25,
-            True,
-            True,
-            _write_gifs,
+            resolution=720,
+            fps=25,
+            states=True,
+            transitions=True,
+            write=_write_gifs,
             gif=True,
             max_fps=GIF_MAX_FPS,
         ),
-        Preset("beamer", "Beamer / PDF: a PNG per state", 1080, 60, True, False, _write_files),
-        Preset("video", "the whole lesson: every transition in one MP4", 1080, 60, False, True, _write_video),
+        Preset(
+            "beamer",
+            "Beamer / PDF: a PNG per state",
+            resolution=1080,
+            fps=60,
+            states=True,
+            transitions=False,
+            write=_write_files,
+        ),
+        Preset(
+            "video",
+            "the whole lesson: every transition in one MP4",
+            resolution=1080,
+            fps=60,
+            states=False,
+            transitions=True,
+            write=_write_video,
+        ),
     ]
 }
