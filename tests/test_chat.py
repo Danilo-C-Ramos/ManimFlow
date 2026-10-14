@@ -17,14 +17,14 @@ async def open_lesson(lesson, scenario, delay=0.0):
 
 
 def send(user, text):
-    user.find(marker="mensagem").type(text)
+    user.find(marker="message").type(text)
     user.find("Enviar").click()
 
 
 def conversation(user):
     """The text of every chat entry, in the order the page shows them."""
     with user:
-        (column,) = user.find(marker="conversa").elements
+        (column,) = user.find(marker="conversation").elements
         return [
             element.text if isinstance(element, ui.label) else element.content
             for element in column.descendants()
@@ -34,7 +34,7 @@ def conversation(user):
 
 def input_enabled(user):
     with user:
-        (field,) = user.find(marker="mensagem").elements
+        (field,) = user.find(marker="message").elements
         (button,) = user.find("Enviar").elements
         return field.enabled and button.enabled
 
@@ -57,7 +57,7 @@ async def test_sending_a_message_streams_the_agent_events_in_order(tmp_path):
             "muda a cor da luz",
             "Vou trocar a cor da luz.",
             "manimflow preview . S2",
-            "concluído",
+            "Concluído: manimflow preview . S2",
             "Arquivo criado: cenas.py",
             "Pronto, a luz está amarela.",
         ]
@@ -76,12 +76,12 @@ async def test_a_failed_command_shows_its_exit_code(tmp_path):
     async with open_lesson(tmp_path, scenario) as user:
         send(user, "renderiza")
 
-        await user.should_see("falhou (código 2)")
+        await user.should_see("Falhou (código 2): manimflow render . S2")
         assert conversation(user) == [
             "renderiza",
             "manimflow render . S2",
-            "falhou (código 2)",
             "Arquivo alterado: cenas.py",
+            "Falhou (código 2): manimflow render . S2",
         ]
 
 
@@ -119,7 +119,8 @@ async def test_a_crash_in_the_agent_is_shown_as_an_error_in_portuguese(tmp_path)
     async with open_lesson(tmp_path, scenario) as user:
         send(user, "renderiza")
 
-        await user.should_see("O agente parou por um erro inesperado: app-server exited")
+        await user.should_see("O agente parou por um erro inesperado.")
+        await user.should_not_see("app-server exited")
         assert input_enabled(user)
 
 

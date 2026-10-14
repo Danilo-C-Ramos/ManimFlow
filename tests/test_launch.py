@@ -34,7 +34,7 @@ async def test_demo_opens_a_copy_of_the_bundled_example_with_the_scripted_agent(
         await user.open("/")
         await user.should_see("Relatividade - herói e espelho")
 
-        user.find(marker="mensagem").type("muda a cor da luz")
+        user.find(marker="message").type("muda a cor da luz")
         user.find("Enviar").click()
         await user.should_see("Arquivo criado: rascunho.md", retries=50)
 

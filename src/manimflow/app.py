@@ -71,11 +71,9 @@ def lesson_page(agent: Agent, lesson: Path) -> Callable[[], Awaitable[None]]:
 class Chat:
     def __init__(self, session: Session) -> None:
         self.session = session
-        # The status label of each running command, by command id.
-        self._commands: dict[str, ui.label] = {}
         with ui.column().classes("w-full max-w-3xl mx-auto h-[calc(100vh-6rem)]"):
             with ui.scroll_area().classes("grow w-full") as self.scroll:
-                self.conversation = ui.column().classes("w-full gap-2").mark("conversa")
+                self.conversation = ui.column().classes("w-full gap-2").mark("conversation")
             with ui.row().classes("items-center gap-2 text-grey-7") as self.working:
                 ui.spinner(size="sm")
                 ui.label("O agente está trabalhando…")
@@ -85,7 +83,7 @@ class Chat:
                     ui.input(placeholder="Escreva para o agente")
                     .props("outlined dense")
                     .classes("grow")
-                    .mark("mensagem")
+                    .mark("message")
                 )
                 self.input.on("keydown.enter", self.send)
                 self.button = ui.button("Enviar", on_click=self.send)
@@ -103,10 +101,11 @@ class Chat:
                 with self.conversation:
                     self._show(event)
                 self.scroll.scroll_to(percent=1)
-        except Exception as error:
+        except Exception:
+            # The engine's own message is in English and meant for developers.
             logger.exception("Agent turn failed")
             with self.conversation:
-                _error(f"O agente parou por um erro inesperado: {error}")
+                _error_row("O agente parou por um erro inesperado.")
         finally:
             self._set_busy(False)
 
@@ -120,29 +119,30 @@ class Chat:
             case AssistantText(text):
                 with ui.chat_message(name="Agente"):
                     ui.markdown(text)
-            case CommandStarted(id, command):
-                self._commands[id] = _command_row(command)
-            case CommandFinished(id, command):
-                status = self._commands.pop(id, None) or _command_row(command)
-                status.set_text("concluído" if event.ok else f"falhou (código {event.exit_code})")
-                status.classes(replace="text-positive" if event.ok else "text-negative")
+            case CommandStarted(_, command):
+                with _event_row("terminal", "grey-7"):
+                    ui.label(command).classes("font-mono")
+            case CommandFinished(_, command):
+                if event.ok:
+                    icon, color, outcome = "check_circle", "positive", "Concluído"
+                else:
+                    icon, color, outcome = "cancel", "negative", f"Falhou (código {event.exit_code})"
+                with _event_row(icon, color):
+                    ui.label(f"{outcome}: {command}")
             case FileChanged(path, change):
-                with ui.row().classes("items-center gap-2 text-sm"):
-                    ui.icon("edit_document", color="primary")
+                with _event_row("edit_document", "primary"):
                     ui.label(f"{_FILE_CHANGES[change]}: {path}")
             case AgentError(message):
-                _error(f"Erro do agente: {message}")
+                _error_row(f"Erro do agente: {message}")
 
 
-def _command_row(command: str) -> ui.label:
-    """Shows a running command and returns the label that holds its status."""
-    with ui.row().classes("items-center gap-2 text-sm no-wrap"):
-        ui.icon("terminal", color="grey-7")
-        ui.label(command).classes("font-mono")
-        return ui.label("executando…").classes("text-grey-7")
+def _event_row(icon: str, color: str) -> ui.row:
+    """A compact row for a non-text event, starting with its icon."""
+    with ui.row().classes("items-center gap-2 text-sm no-wrap") as row:
+        ui.icon(icon, color=color)
+    return row
 
 
-def _error(text: str) -> None:
-    with ui.row().classes("items-center gap-2 no-wrap text-negative"):
-        ui.icon("error")
-        ui.label(text)
+def _error_row(text: str) -> None:
+    with _event_row("error", "negative"):
+        ui.label(text).classes("text-negative text-base")
