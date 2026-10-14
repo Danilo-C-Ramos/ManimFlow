@@ -1,4 +1,4 @@
-"""Validates a lesson's plan file (plano.yaml): its states and the transitions between them.
+"""Validates and loads a lesson's plan file (plano.yaml): its states and the transitions between them.
 
 The schema is documented in docs/plan.md. Errors are in Portuguese because the
 teacher reads them.
@@ -38,11 +38,49 @@ class PlanReport:
         }
 
 
+@dataclass(frozen=True)
+class State:
+    id: str
+    scene: str
+
+
+@dataclass(frozen=True)
+class Transition:
+    source: str
+    target: str
+    scene: str
+
+    @property
+    def name(self) -> str:
+        """`S0-S1`: ids are plain identifiers, so the hyphen can't be part of one."""
+        return f"{self.source}-{self.target}"
+
+
+@dataclass(frozen=True)
+class Plan:
+    states: list[State]
+    transitions: list[Transition]
+
+    def state(self, state_id: str) -> State:
+        return next(state for state in self.states if state.id == state_id)
+
+
 def validate_plan(lesson: Path) -> PlanReport:
     """Checks the lesson's plano.yaml against the schema and the lesson's scenes file."""
     report = PlanReport(lesson=lesson.absolute())
     report.errors = _plan_errors(report.lesson)
     return report
+
+
+def load_plan(lesson: Path) -> tuple[Plan | None, list[str]]:
+    """The lesson's plan, or None with the validation errors when it isn't valid."""
+    report = validate_plan(lesson)
+    if not report.ok:
+        return None, report.errors
+    plan = yaml.safe_load((report.lesson / PLAN_FILE).read_text(encoding="utf-8"))
+    states = [State(item["id"], item["cena"]) for item in plan["estados"]]
+    transitions = [Transition(item["de"], item["para"], item["cena"]) for item in plan.get("transicoes") or []]
+    return Plan(states, transitions), []
 
 
 def _plan_errors(lesson: Path) -> list[str]:

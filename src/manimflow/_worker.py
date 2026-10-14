@@ -14,6 +14,7 @@ from pathlib import Path
 
 def main(scenes_file: str, scene_name: str, quality: str, media_dir: str, out_dir: str) -> None:
     from manim import Scene, tempconfig
+    from manim.renderer.cairo_renderer import CairoRenderer
     from PIL import Image
 
     scenes_path = Path(scenes_file).resolve()
@@ -35,6 +36,11 @@ def main(scenes_file: str, scene_name: str, quality: str, media_dir: str, out_di
         scene.render()
 
         renderer = scene.renderer
+        if isinstance(renderer, CairoRenderer):
+            # The last play leaves its still mobjects drawn on a background image; drawing
+            # every mobject over that again darkens their anti-aliased edges, and the image
+            # would no longer match the video's last frame.
+            renderer.static_image = None
         renderer.update_frame(scene)
         Image.fromarray(renderer.get_frame()).save(out / f"{scene_name}.png")
         if renderer.num_plays:

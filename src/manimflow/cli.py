@@ -7,6 +7,13 @@ import sys
 from pathlib import Path
 from typing import Protocol
 
+from manimflow.continuity import (
+    CHANNEL_DIFF,
+    MAX_FRACTION,
+    Pair,
+    check_continuity,
+    extract_frames,
+)
 from manimflow.plan import validate_plan
 from manimflow.render import render_scene
 
@@ -23,6 +30,28 @@ def main(argv: list[str] | None = None) -> int:
         command.add_argument("scene", help="scene class name in cenas.py")
         command.add_argument("--json", action="store_true", help="print a JSON report")
 
+    frames = commands.add_parser(
+        "frames", help="save the first, middle and last frame of transitions, and state images"
+    )
+    _add_frame_arguments(frames)
+
+    continuity = commands.add_parser(
+        "check-continuity", help="check that transitions start and end on their states' images"
+    )
+    _add_frame_arguments(continuity)
+    continuity.add_argument(
+        "--channel-diff",
+        type=_channel_diff,
+        default=CHANNEL_DIFF,
+        help=f"a pixel differs when any channel differs by more than this (default: {CHANNEL_DIFF})",
+    )
+    continuity.add_argument(
+        "--max-fraction",
+        type=_fraction,
+        default=MAX_FRACTION,
+        help=f"images match when under this fraction of pixels differ (default: {MAX_FRACTION})",
+    )
+
     plan = commands.add_parser("plan", help="work with a lesson's plano.yaml")
     plan_commands = plan.add_subparsers(dest="plan_command", required=True)
     validate = plan_commands.add_parser("validate", help="check a lesson's plano.yaml")
@@ -37,7 +66,38 @@ def main(argv: list[str] | None = None) -> int:
             stream.reconfigure(encoding="utf-8")
     if args.command == "plan":
         return _plan_validate(args.lesson, args.json)
+    if args.command == "frames":
+        return _frames(args.lesson, args.transitions, args.final, args.json)
+    if args.command == "check-continuity":
+        return _check_continuity(
+            args.lesson, args.transitions, args.final, args.channel_diff, args.max_fraction, args.json
+        )
     return _render(args.lesson, args.scene, args.command, args.json)
+
+
+def _add_frame_arguments(command: argparse.ArgumentParser) -> None:
+    command.add_argument("lesson", type=Path, help="lesson folder")
+    command.add_argument(
+        "transitions", nargs="*", metavar="transition", help="transitions such as S0-S1 (default: all)"
+    )
+    command.add_argument(
+        "--final", action="store_true", help="read the final render instead of the preview"
+    )
+    command.add_argument("--json", action="store_true", help="print a JSON report")
+
+
+def _channel_diff(text: str) -> int:
+    value = int(text)
+    if not 0 <= value < 255:
+        raise argparse.ArgumentTypeError("must be from 0 to 254")
+    return value
+
+
+def _fraction(text: str) -> float:
+    value = float(text)
+    if not 0 < value <= 1:
+        raise argparse.ArgumentTypeError("must be above 0 and at most 1")
+    return value
 
 
 class _Report(Protocol):
@@ -53,6 +113,31 @@ def _render(lesson: Path, scene: str, mode: str, as_json: bool) -> int:
     report = render_scene(lesson, scene, mode)
     details = [report.manim_output] if report.manim_output else []
     return _finish(report, as_json, [str(path) for path in report.files], details)
+
+
+def _frames(lesson: Path, transitions: list[str], final: bool, as_json: bool) -> int:
+    report = extract_frames(lesson, transitions, final)
+    return _finish(report, as_json, [str(path) for path in report.files], [])
+
+
+def _check_continuity(
+    lesson: Path,
+    transitions: list[str],
+    final: bool,
+    channel_diff: int,
+    max_fraction: float,
+    as_json: bool,
+) -> int:
+    report = check_continuity(lesson, transitions, final, channel_diff, max_fraction)
+    return _finish(report, as_json, [_pair_line(pair) for pair in report.pairs], [])
+
+
+def _pair_line(pair: Pair) -> str:
+    sign = "=" if pair.ok else "≠"
+    return (
+        f"{'ok' if pair.ok else 'FAIL'}  {pair.transition} {pair.position} {sign} {pair.state} "
+        f"({pair.fraction:.3%})"
+    )
 
 
 def _plan_validate(lesson: Path, as_json: bool) -> int:
