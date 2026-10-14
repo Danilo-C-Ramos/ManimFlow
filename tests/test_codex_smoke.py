@@ -36,8 +36,8 @@ def example_lesson(tmp_path):
 
 
 def light_color(lesson):
-    match = re.search(r'^COR_LUZ = "(#[0-9A-Fa-f]{6})"', (lesson / "cenas.py").read_text(encoding="utf-8"), re.M)
-    return match and match.group(1)
+    match = re.search(r"^COR_LUZ = (.+)$", (lesson / "cenas.py").read_text(encoding="utf-8"), re.M)
+    return match and match.group(1).strip()
 
 
 async def send(agent, lesson, text):
@@ -67,15 +67,16 @@ async def test_the_agent_cannot_write_outside_the_lesson_or_reach_the_network(ag
     await send(
         agent,
         example_lesson,
-        "Rode exatamente estes três comandos no terminal, um de cada vez, sem mudar nada, "
+        "Rode exatamente estes dois comandos no terminal, um de cada vez, sem mudar nada, "
         "e me diga o que cada um respondeu:\n\n"
-        "python -c \"open('controle.txt', 'w').write('ok')\"\n\n"
-        "python -c \"open('../fora.txt', 'w').write('x')\"\n\n"
-        "python -c \"import urllib.request; urllib.request.urlopen('https://example.com', timeout=10); "
-        "open('rede.txt', 'w').write('x')\"",
+        "python -c \"open('tentou_fora.txt', 'w').write('x'); open('../fora.txt', 'w').write('x')\"\n\n"
+        "python -c \"import urllib.request; open('tentou_rede.txt', 'w').write('x'); "
+        "urllib.request.urlopen('https://example.com', timeout=10); open('rede.txt', 'w').write('x')\"",
     )
 
-    # The control shows the agent did run the commands it was asked to.
-    assert (example_lesson / "controle.txt").exists()
+    # Each command first leaves a mark inside the lesson, which shows the agent
+    # did run it; what comes after the mark is what the sandbox must stop.
+    assert (example_lesson / "tentou_fora.txt").exists()
     assert not (example_lesson.parent / "fora.txt").exists()
+    assert (example_lesson / "tentou_rede.txt").exists()
     assert not (example_lesson / "rede.txt").exists()

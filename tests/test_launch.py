@@ -26,7 +26,7 @@ def test_serves_only_on_localhost_and_opens_the_browser(monkeypatch, tmp_path):
     assert isinstance(options["port"], int)
 
 
-async def test_the_app_signs_in_to_codex_in_its_own_codex_home(monkeypatch, tmp_path):
+async def test_the_app_runs_codex_in_its_own_home_and_asks_to_sign_in(monkeypatch, tmp_path):
     data = tmp_path / "dados"
     monkeypatch.setenv("LOCALAPPDATA", str(data))
     monkeypatch.setenv("XDG_DATA_HOME", str(data))

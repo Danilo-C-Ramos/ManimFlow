@@ -159,6 +159,7 @@ class CodexAgent:
     async def close(self) -> None:
         if self._codex is not None:
             await self._codex.close()
+            self._codex = None
 
 
 class CodexSession:
@@ -192,7 +193,7 @@ def _events(notification: Notification, lesson: Path) -> list[Event]:
                 case AgentMessageThreadItem(text=text):
                     return [AssistantText(text)]
                 case CommandExecutionThreadItem() as run:
-                    # A command the sandbox refused never gets an exit code.
+                    # A command Codex declined to run has no exit code.
                     exit_code = run.exit_code if run.exit_code is not None else -1
                     return [CommandFinished(run.id, _command(run), exit_code)]
                 case FileChangeThreadItem(status=PatchApplyStatus.completed, changes=changes):
