@@ -116,13 +116,16 @@ async def test_the_agent_can_run_the_manimflow_cli(codex_agent, mock_model, less
 
     await turn(await codex_agent.start_session(lesson))
 
-    assert exit_code(mock_model.requests[-1], "c1") == 0
+    code, output = shell_result(mock_model.requests[-1], "c1")
+    assert code == 0, output
 
 
-def exit_code(request, call_id):
-    """The exit code Codex reported to the model for one of its shell calls."""
+def shell_result(request, call_id):
+    """The exit code and output Codex reported to the model for one of its shell calls."""
     (output,) = [item["output"] for item in request["input"] if item.get("call_id") == call_id and "output" in item]
-    return int(re.search(r"exited with code (-?\d+)", output).group(1))
+    match = re.search(r"exited with code (-?\d+)", output)
+    assert match, output
+    return int(match.group(1)), output
 
 
 async def test_the_agent_writes_only_inside_the_lesson(codex_agent, mock_model, lesson):
@@ -135,10 +138,10 @@ async def test_the_agent_writes_only_inside_the_lesson(codex_agent, mock_model, 
 
     events = await turn(await codex_agent.start_session(lesson))
 
-    assert (lesson / "dentro.txt").exists()
+    assert (lesson / "dentro.txt").exists(), shell_result(mock_model.requests[-1], "c1")[1]
     assert not (lesson.parent / "fora.txt").exists()
     assert not (lesson.parent / "fora_patch.txt").exists()
-    assert exit_code(mock_model.requests[-1], "c2") != 0
+    assert shell_result(mock_model.requests[-1], "c2")[0] != 0
     # Codex reports a command the sandbox stopped only to the model, not as an item.
     assert [event.command for event in events if isinstance(event, CommandFinished) and event.ok] == [write_inside]
     assert not [event for event in events if isinstance(event, FileChanged)]
@@ -154,7 +157,8 @@ async def test_the_agent_has_no_network(codex_agent, mock_model, lesson):
 
     events = await turn(await codex_agent.start_session(lesson))
 
-    assert exit_code(mock_model.requests[-1], "c1") != 0
+    code, output = shell_result(mock_model.requests[-1], "c1")
+    assert code != 0, output
     assert not [event for event in events if isinstance(event, CommandFinished) and event.ok]
     assert "web_search" not in tool_names(mock_model.requests[0])
 
