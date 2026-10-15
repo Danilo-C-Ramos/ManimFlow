@@ -12,6 +12,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from manimflow import tinytex
+
 SCENES_FILE = "cenas.py"
 OUTPUT_DIR = "saida"
 CACHE_DIR = ".manimflow"
@@ -157,6 +159,8 @@ def run_worker(
             "PYTHONDONTWRITEBYTECODE": "1",
             # Windows would otherwise write tracebacks in the ANSI code page.
             "PYTHONUTF8": "1",
+            # Manim finds latex and dvisvgm here: ManimFlow's TinyTeX before any other.
+            "PATH": tinytex.search_path(),
         },
     )
     return WorkerResult(scene, worker.returncode, worker.stdout)

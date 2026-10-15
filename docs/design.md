@@ -192,7 +192,7 @@ Editable fields: resolution, fps, background and aspect ratio. Alpha channel out
 ### 6.12 Testing
 
 - **Per lesson.** The agent maintains `test_fisica.py`, which checks the values returned by `equacoes()`, and runs it on every change.
-- **ManimFlow itself.** pytest for the CLI (render, frames, continuity, export) in GitHub Actions.
+- **ManimFlow itself.** pytest for the CLI (render, frames, continuity, export, doctor) in GitHub Actions.
 - **Later.** A small agent benchmark with 5 to 10 typical teacher requests, scored on render success, required code patterns and animation count with pass@k, modeled on Generative Manim's benchmark.
 
 ### 6.13 Hosting

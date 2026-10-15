@@ -31,14 +31,15 @@ def _manimflow_executable() -> str:
     return str(scripts / name)
 
 
-def run_manimflow(*args: str) -> Result:
-    """Run the installed `manimflow` console script, as a user would."""
+def run_manimflow(*args: str, env: dict[str, str] | None = None) -> Result:
+    """Run the installed `manimflow` console script, as a user would, in `env` when given."""
     proc = subprocess.run(
         [_manimflow_executable(), *args],
         capture_output=True,
         text=True,
         encoding="utf-8",
         timeout=600,
+        env=env,
     )
     return Result(proc.returncode, proc.stdout, proc.stderr)
 

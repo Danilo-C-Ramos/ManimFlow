@@ -16,6 +16,7 @@ from manimflow.continuity import (
     check_continuity,
     extract_frames,
 )
+from manimflow.doctor import doctor
 from manimflow.export import PRESETS, export_lesson
 from manimflow.plan import validate_plan
 from manimflow.render import render_scene
@@ -86,6 +87,16 @@ def main(argv: list[str] | None = None) -> int:
     validate.add_argument("lesson", type=Path, help="lesson folder")
     validate.add_argument("--json", action="store_true", help="print a JSON report")
 
+    doctor_command = commands.add_parser(
+        "doctor", help="check what rendering needs, and explain in Portuguese what is missing"
+    )
+    doctor_command.add_argument(
+        "--install",
+        action="store_true",
+        help="first install TinyTeX and Manim's LaTeX packages into a per-user folder",
+    )
+    doctor_command.add_argument("--json", action="store_true", help="print a JSON report")
+
     args = parser.parse_args(argv)
     # The agent and the UI read this output through pipes; lesson paths are
     # often accented ("Aula 09 - Óptica"), so don't depend on the code page.
@@ -94,6 +105,8 @@ def main(argv: list[str] | None = None) -> int:
             stream.reconfigure(encoding="utf-8")
     if args.command == "plan":
         return _plan_validate(args.lesson, args.json)
+    if args.command == "doctor":
+        return _doctor(args.install, args.json)
     if args.command == "export":
         return _export(
             args.lesson, args.preset, args.resolution, args.fps, args.aspect_ratio, args.background, args.json
@@ -223,6 +236,18 @@ def _pair_line(pair: Pair) -> str:
 def _plan_validate(lesson: Path, as_json: bool) -> int:
     report = validate_plan(lesson)
     return _finish(report, as_json, ["Plano válido."] if report.ok else [], [])
+
+
+def _doctor(install: bool, as_json: bool) -> int:
+    # Progress goes to stderr, so the JSON report stays alone on stdout.
+    report = doctor(install, lambda message: print(message, file=sys.stderr, flush=True))
+    lines = []
+    if install and not report.errors:
+        installed = ", ".join(report.installed)
+        lines.append(f"Instalado: {installed}." if installed else "Nada a instalar: tudo já estava lá.")
+    lines += [f"{'ok' if check.ok else 'falta':<6}{check.message}" for check in report.checks]
+    details = [report.install_output] if report.install_output else []
+    return _finish(report, as_json, lines, details)
 
 
 def _finish(report: _Report, as_json: bool, lines: list[str], details: list[str]) -> int:

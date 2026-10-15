@@ -18,19 +18,17 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libcairo2-dev libpango1.0-dev pkg-config
 
-      # The bundled example writes Tex and MathTex, so CI needs LaTeX. TinyTeX plus
-      # Manim's documented package list is also what `doctor` will install for teachers.
-      - uses: r-lib/actions/setup-tinytex@v2.14.0
-
-      - name: Install Manim's LaTeX packages
-        run: |
-          tlmgr update --self
-          tlmgr install standalone preview doublestroke setspace rsfs relsize ragged2e fundus-calligra microtype wasysym physics dvisvgm jknapltx wasy cm-super babel-english gnu-freefont mathastext cbfonts-fd
-
       - uses: astral-sh/setup-uv@v10.3.0  # no floating major tags since v8
 
       - name: Install
         run: uv sync --locked
+
+      # The bundled example writes Tex and MathTex, so CI needs LaTeX: the TinyTeX that
+      # `doctor` installs for teachers, in the runner's user folder. It ends with check mode
+      # and fails if anything is still missing. The tests then render with it, and check
+      # that a second install changes nothing.
+      - name: Install LaTeX
+        run: uv run manimflow doctor --install
 
       - name: Typecheck
         run: uv run mypy
