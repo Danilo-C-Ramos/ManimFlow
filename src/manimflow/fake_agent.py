@@ -1,8 +1,9 @@
 """A scripted agent that replays a fixed scenario, for tests and the demo mode.
 
 A scenario is a list of turns, one per message the teacher sends. A turn is a
-list of steps: events to emit, file edits to apply to the lesson folder, or an
-exception to raise, as a broken engine would.
+list of steps: events to emit, file edits to apply to the lesson folder, files
+a command produces (such as renders), or an exception to raise, as a broken
+engine would.
 """
 
 import asyncio
@@ -31,7 +32,19 @@ class EditFile:
     content: str
 
 
-Step = Event | EditFile | Exception
+@dataclass(frozen=True)
+class Produce:
+    """Writes `content` to `path`, relative to the lesson folder, without reporting it.
+
+    The way a command the agent runs writes its outputs: `manimflow preview`
+    writes images and videos that never show up as file changes.
+    """
+
+    path: str
+    content: bytes
+
+
+Step = Event | EditFile | Produce | Exception
 Scenario = list[list[Step]]
 
 ACCOUNT = Account(logged_in=True, method="chatgpt", email="professora@example.com")
@@ -92,17 +105,24 @@ class ScriptedSession:
                 raise step
             if isinstance(step, EditFile):
                 yield self._edit(step)
+            elif isinstance(step, Produce):
+                self._target(step.path).write_bytes(step.content)
             else:
                 yield step
 
     def _edit(self, edit: EditFile) -> FileChanged:
-        target = (self.lesson / edit.path).resolve()
-        if not target.is_relative_to(self.lesson.resolve()):
-            raise ValueError(f"Scenario edits {edit.path!r}, outside the lesson folder")
+        target = self._target(edit.path)
         existed = target.exists()
-        target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(edit.content, encoding="utf-8")
         return FileChanged(edit.path, "modified" if existed else "added")
+
+    def _target(self, path: str) -> Path:
+        """The file at `path` inside the lesson, with its folder created."""
+        target = (self.lesson / path).resolve()
+        if not target.is_relative_to(self.lesson.resolve()):
+            raise ValueError(f"Scenario writes {path!r}, outside the lesson folder")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        return target
 
 
 # The demo mode's scenario, played on a copy of the bundled example.

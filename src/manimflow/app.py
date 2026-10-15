@@ -21,6 +21,7 @@ from manimflow.agent import (
     LoginFailed,
     Session,
 )
+from manimflow.preview import PreviewPanel
 
 logger = logging.getLogger(__name__)
 
@@ -70,8 +71,11 @@ def lesson_page(agent: Agent, lesson: Path) -> Callable[[], Awaitable[None]]:
         async def open_chat() -> None:
             session = await agent.start_session(lesson)
             body.clear()
-            with body:
-                Chat(session)
+            with body, ui.row().classes("w-full no-wrap items-start gap-6"):
+                with ui.column().classes("w-1/2"):
+                    Chat(session)
+                with ui.scroll_area().classes("w-1/2 h-[calc(100vh-6rem)]"):
+                    PreviewPanel(lesson)
 
         if (await agent.account()).logged_in:
             await open_chat()

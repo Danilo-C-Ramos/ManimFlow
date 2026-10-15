@@ -38,11 +38,42 @@ class PlanReport:
         }
 
 
+@dataclass(frozen=True)
+class State:
+    id: str
+    scene: str
+    title: str
+
+
+@dataclass(frozen=True)
+class Transition:
+    source: str
+    target: str
+    scene: str
+
+
+@dataclass(frozen=True)
+class Plan:
+    states: list[State]
+    transitions: list[Transition]
+
+
 def validate_plan(lesson: Path) -> PlanReport:
     """Checks the lesson's plano.yaml against the schema and the lesson's scenes file."""
     report = PlanReport(lesson=lesson.absolute())
     report.errors = _plan_errors(report.lesson)
     return report
+
+
+def load_plan(lesson: Path) -> tuple[Plan | None, list[str]]:
+    """The lesson's plan, or None with the validation errors when it isn't valid."""
+    report = validate_plan(lesson)
+    if not report.ok:
+        return None, report.errors
+    plan = yaml.safe_load((report.lesson / PLAN_FILE).read_text(encoding="utf-8"))
+    states = [State(item["id"], item["cena"], item["titulo"]) for item in plan["estados"]]
+    transitions = [Transition(item["de"], item["para"], item["cena"]) for item in plan.get("transicoes") or []]
+    return Plan(states, transitions), []
 
 
 def _plan_errors(lesson: Path) -> list[str]:

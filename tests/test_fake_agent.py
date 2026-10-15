@@ -1,5 +1,5 @@
 from manimflow.agent import AgentError, AssistantText, CommandFinished, CommandStarted, FileChanged
-from manimflow.fake_agent import EditFile, ScriptedAgent
+from manimflow.fake_agent import EditFile, Produce, ScriptedAgent
 
 
 async def collect(stream):
@@ -42,6 +42,27 @@ async def test_editing_an_existing_file_reports_a_modification(tmp_path):
 
     assert events == [FileChanged("cenas.py", "modified")]
     assert (tmp_path / "cenas.py").read_text(encoding="utf-8") == "depois\n"
+
+
+async def test_a_command_s_output_is_written_without_reporting_a_file_change(tmp_path):
+    agent = ScriptedAgent(
+        [
+            [
+                CommandStarted("1", "manimflow preview . S0"),
+                Produce("saida/previa/png/S0.png", b"\x89PNG"),
+                CommandFinished("1", "manimflow preview . S0", 0),
+            ]
+        ]
+    )
+    session = await agent.start_session(tmp_path)
+
+    events = await collect(session.send("renderiza"))
+
+    assert events == [
+        CommandStarted("1", "manimflow preview . S0"),
+        CommandFinished("1", "manimflow preview . S0", 0),
+    ]
+    assert (tmp_path / "saida/previa/png/S0.png").read_bytes() == b"\x89PNG"
 
 
 async def test_reports_an_error_when_the_scenario_runs_out(tmp_path):
