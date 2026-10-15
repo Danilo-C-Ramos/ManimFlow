@@ -1,5 +1,6 @@
 """Renders one lesson scene into the lesson's output folder."""
 
+import json
 import keyword
 import os
 import re
@@ -10,6 +11,8 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from manimflow import tinytex
 
 SCENES_FILE = "cenas.py"
 OUTPUT_DIR = "saida"
@@ -81,43 +84,13 @@ def _render_into(report: RenderReport, lesson: Path, scene: str, mode: str) -> N
         return
 
     quality, output_dir = QUALITIES[mode]
-    cache_dir = lesson / CACHE_DIR
-    cache_dir.mkdir(exist_ok=True)
-
     # Everything is written inside the lesson folder, the only place the
     # agent's sandbox lets it write.
-    with tempfile.TemporaryDirectory(dir=cache_dir) as staging:
-        worker = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "manimflow._worker",
-                str(lesson / SCENES_FILE),
-                scene,
-                quality,
-                str(cache_dir / "media"),
-                staging,
-            ],
-            cwd=lesson,
-            # Manim logs its errors (LaTeX failures among them) to stdout and
-            # Python writes the traceback to stderr; the report needs both.
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            env={
-                **os.environ,
-                # Keep __pycache__ out of the teacher's lesson folder.
-                "PYTHONDONTWRITEBYTECODE": "1",
-                # Windows would otherwise write tracebacks in the ANSI code page.
-                "PYTHONUTF8": "1",
-            },
-        )
-        if worker.returncode != 0:
-            report.manim_output = worker.stdout
-            last_line = worker.stdout.strip().splitlines()[-1:] or ["no error output"]
-            report.errors.append(f"Scene {scene} failed: {last_line[0]}")
+    with tempfile.TemporaryDirectory(dir=cache_dir(lesson)) as staging:
+        worker = run_worker(lesson, scene, quality, Path(staging))
+        if not worker.ok:
+            report.manim_output = worker.output
+            report.errors.append(worker.error)
             return
 
         for kind in ("png", "mp4"):
@@ -130,3 +103,64 @@ def _render_into(report: RenderReport, lesson: Path, scene: str, mode: str) -> N
             else:
                 # A scene that no longer animates must not keep an old video.
                 target.unlink(missing_ok=True)
+
+
+def cache_dir(lesson: Path) -> Path:
+    """Where renders are staged and Manim keeps its cache, inside the lesson folder."""
+    path = lesson / CACHE_DIR
+    path.mkdir(exist_ok=True)
+    return path
+
+
+@dataclass
+class WorkerResult:
+    scene: str
+    returncode: int
+    output: str
+
+    @property
+    def ok(self) -> bool:
+        return self.returncode == 0
+
+    @property
+    def error(self) -> str:
+        last_line = self.output.strip().splitlines()[-1:] or ["no error output"]
+        return f"Scene {self.scene} failed: {last_line[0]}"
+
+
+def run_worker(
+    lesson: Path, scene: str, quality: str, out_dir: Path, settings: dict | None = None
+) -> WorkerResult:
+    """Renders `scene` of an absolute lesson path in its own process, writing its image and
+    video into `out_dir` (see manimflow._worker for the files and the settings)."""
+    worker = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "manimflow._worker",
+            str(lesson / SCENES_FILE),
+            scene,
+            quality,
+            str(cache_dir(lesson) / "media"),
+            str(out_dir),
+            json.dumps(settings or {}),
+        ],
+        cwd=lesson,
+        # Manim logs its errors (LaTeX failures among them) to stdout and
+        # Python writes the traceback to stderr; the report needs both.
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env={
+            **os.environ,
+            # Keep __pycache__ out of the teacher's lesson folder.
+            "PYTHONDONTWRITEBYTECODE": "1",
+            # Windows would otherwise write tracebacks in the ANSI code page.
+            "PYTHONUTF8": "1",
+            # Manim finds latex and dvisvgm here: ManimFlow's TinyTeX before any other.
+            "PATH": tinytex.search_path(),
+        },
+    )
+    return WorkerResult(scene, worker.returncode, worker.stdout)

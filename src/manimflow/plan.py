@@ -1,4 +1,4 @@
-"""Validates a lesson's plan file (plano.yaml): its states and the transitions between them.
+"""Validates and loads a lesson's plan file (plano.yaml): its states and the transitions between them.
 
 The schema is documented in docs/plan.md. Errors are in Portuguese because the
 teacher reads them.
@@ -51,11 +51,19 @@ class Transition:
     target: str
     scene: str
 
+    @property
+    def name(self) -> str:
+        """`S0-S1`: ids are plain identifiers, so the hyphen can't be part of one."""
+        return f"{self.source}-{self.target}"
+
 
 @dataclass(frozen=True)
 class Plan:
     states: list[State]
     transitions: list[Transition]
+
+    def state(self, state_id: str) -> State:
+        return next(state for state in self.states if state.id == state_id)
 
 
 def validate_plan(lesson: Path) -> PlanReport:

@@ -8,6 +8,7 @@ from importlib.resources import files
 from pathlib import Path
 
 import pytest
+import yaml
 
 from manimflow.codex_agent import CodexAgent
 from mock_model import MockModel
@@ -33,21 +34,29 @@ def _manimflow_executable() -> str:
     return str(scripts / name)
 
 
+def run_manimflow(*args: str, env: dict[str, str] | None = None) -> Result:
+    """Run the installed `manimflow` console script, as a user would, in `env` when given."""
+    proc = subprocess.run(
+        [_manimflow_executable(), *args],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=600,
+        env=env,
+    )
+    return Result(proc.returncode, proc.stdout, proc.stderr)
+
+
 @pytest.fixture
 def manimflow():
-    """Run the installed `manimflow` console script, as a user would."""
+    return run_manimflow
 
-    def run(*args: str) -> Result:
-        proc = subprocess.run(
-            [_manimflow_executable(), *args],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            timeout=600,
-        )
-        return Result(proc.returncode, proc.stdout, proc.stderr)
 
-    return run
+def preview(lesson: Path, *scenes: str) -> None:
+    """Preview each scene, failing the test if any doesn't render."""
+    for scene in scenes:
+        result = run_manimflow("preview", str(lesson), scene)
+        assert result.returncode == 0, result.stderr
 
 
 @pytest.fixture
@@ -86,3 +95,35 @@ async def codex_agent(codex_home):
     agent = CodexAgent(codex_home)
     yield agent
     await agent.close()
+
+
+def plan_scenes(lesson: Path) -> list[str]:
+    """Every scene a lesson's plan uses, in plan order."""
+    plan = yaml.safe_load((lesson / "plano.yaml").read_text(encoding="utf-8"))
+    scenes = [item["cena"] for item in plan["estados"] + plan["transicoes"]]
+    return list(dict.fromkeys(scenes))
+
+
+@dataclass
+class RenderedExample:
+    path: Path
+    previews: dict[str, Result]
+
+
+@pytest.fixture(scope="session")
+def rendered_example(tmp_path_factory) -> RenderedExample:
+    """The bundled example with a preview of every scene in its plan, rendered once per run.
+
+    Tests that change it work on their own copy (`rendered_example_copy`).
+    """
+    path = tmp_path_factory.mktemp("rendered") / "Relatividade - herói e espelho"
+    shutil.copytree(EXAMPLE, path)
+    previews = {scene: run_manimflow("preview", str(path), scene, "--json") for scene in plan_scenes(path)}
+    return RenderedExample(path, previews)
+
+
+@pytest.fixture
+def rendered_example_copy(tmp_path, rendered_example) -> Path:
+    path = tmp_path / rendered_example.path.name
+    shutil.copytree(rendered_example.path, path)
+    return path

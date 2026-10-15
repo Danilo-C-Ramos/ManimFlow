@@ -2,15 +2,8 @@ import subprocess
 import sys
 
 import pytest
-import yaml
 
-from conftest import EXAMPLE
-
-
-def plan_scenes() -> list[str]:
-    plan = yaml.safe_load((EXAMPLE / "plano.yaml").read_text(encoding="utf-8"))
-    scenes = [item["cena"] for item in plan["estados"] + plan["transicoes"]]
-    return list(dict.fromkeys(scenes))
+from conftest import EXAMPLE, plan_scenes
 
 
 def test_example_ships_the_lesson_layout_and_a_profile():
@@ -41,9 +34,53 @@ def test_example_physics_tests_pass(example):
     assert " passed" in result.stdout
 
 
-@pytest.mark.parametrize("scene", plan_scenes())
-def test_every_scene_in_the_example_plan_renders(manimflow, example, scene):
-    result = manimflow("preview", str(example), scene, "--json")
+@pytest.mark.parametrize("scene", plan_scenes(EXAMPLE))
+def test_every_scene_in_the_example_plan_renders(rendered_example, scene):
+    result = rendered_example.previews[scene]
 
     assert result.returncode == 0, result.report["manim_output"]
-    assert (example / "saida" / "previa" / "png" / f"{scene}.png").is_file()
+    assert (rendered_example.path / "saida" / "previa" / "png" / f"{scene}.png").is_file()
+
+
+def test_example_transitions_are_continuous(manimflow, rendered_example_copy):
+    result = manimflow("check-continuity", str(rendered_example_copy), "--json")
+
+    assert result.returncode == 0, result.stdout
+    report = result.report
+    # Seven transitions, each checked at both ends.
+    assert len(report["pairs"]) == 14
+    assert all(pair["ok"] for pair in report["pairs"])
+
+
+def test_example_check_can_be_limited_to_given_transitions(manimflow, rendered_example_copy):
+    result = manimflow("check-continuity", str(rendered_example_copy), "S2-S2b", "S3v-R", "--json")
+
+    assert result.returncode == 0, result.stdout
+    assert [(pair["transition"], pair["position"]) for pair in result.report["pairs"]] == [
+        ("S2-S2b", "inicio"),
+        ("S2-S2b", "fim"),
+        ("S3v-R", "inicio"),
+        ("S3v-R", "fim"),
+    ]
+
+
+def test_example_with_a_broken_final_state_fails_on_that_pair(manimflow, rendered_example_copy):
+    # The boost's last scene adds a square after its last animation, so R's image has a
+    # square that the video never shows.
+    scenes = rendered_example_copy / "cenas.py"
+    text = scenes.read_text(encoding="utf-8")
+    end_of_boost = "        self.play(Create(simetria), run_time=0.5)\n        self.wait(0.3)\n"
+    assert text.count(end_of_boost) == 1
+    scenes.write_text(
+        text.replace(end_of_boost, end_of_boost + "        self.add(Square(side_length=4, fill_opacity=1))\n"),
+        encoding="utf-8",
+    )
+    assert manimflow("preview", str(rendered_example_copy), "R_RefHeroi").returncode == 0
+
+    result = manimflow("check-continuity", str(rendered_example_copy), "--json")
+
+    assert result.returncode != 0
+    failing = [(pair["transition"], pair["position"]) for pair in result.report["pairs"] if not pair["ok"]]
+    assert failing == [("S3v-R", "fim")]
+    assert len(result.report["errors"]) == 1
+    assert "S3v-R" in result.report["errors"][0]
