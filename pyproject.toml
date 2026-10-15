@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "manimflow"
+version = "0.0.1"
+description = "Chat-driven Manim animation studio for teachers"
+readme = "README.md"
+license = "MIT"
+# Pinned to one minor version: every dependency (manim, pycairo, manimpango,
+# av, nicegui, openai-codex-cli-bin, pygit2) ships Windows wheels for 3.12.
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "manim>=0.22,<0.23",
+    "pyyaml>=6,<7",
+]
+
+[project.scripts]
+manimflow = "manimflow.cli:main"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.13",
+    "pytest>=8",
+    "types-pyyaml>=6",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/manimflow"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.mypy]
+files = ["src", "tests"]
+# Lesson code belongs to the teacher and is checked by rendering it, not by mypy.
+exclude = ["src/manimflow/exemplos/"]
+ignore_missing_imports = true

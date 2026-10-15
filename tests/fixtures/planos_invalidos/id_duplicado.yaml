@@ -1,0 +1,16 @@
+estados:
+  - id: S0
+    titulo: Quadrado
+    visivel: Um quadrado azul no centro.
+    cena: S0
+  - id: S0
+    titulo: Quadrado deslocado
+    visivel: O mesmo quadrado, uma unidade à direita.
+    cena: T01
+
+transicoes:
+  - de: S0
+    para: S0
+    descricao: O quadrado anda para a direita.
+    duracao: 0.5
+    cena: T01

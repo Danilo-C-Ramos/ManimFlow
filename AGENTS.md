@@ -2,6 +2,10 @@
 
 Chat-driven Manim animation studio for teachers. Design decisions: `docs/design.md`.
 
+## Branches
+
+Work on issues goes to the `develop` branch, never straight to `main`.
+
 ## Agent skills
 
 ### Issue tracker

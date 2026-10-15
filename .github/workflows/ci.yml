@@ -1,0 +1,39 @@
+name: CI
+
+on: push
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # pycairo and manimpango ship no Linux wheels, so they build from source.
+      # Windows needs nothing: every dependency has a wheel there.
+      - name: Install cairo and pango headers
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libcairo2-dev libpango1.0-dev pkg-config
+
+      - uses: astral-sh/setup-uv@v10.3.0  # no floating major tags since v8
+
+      - name: Install
+        run: uv sync --locked
+
+      # The bundled example writes Tex and MathTex, so CI needs LaTeX: the TinyTeX that
+      # `doctor` installs for teachers, in the runner's user folder. It ends with check mode
+      # and fails if anything is still missing. The tests then render with it, and check
+      # that a second install changes nothing.
+      - name: Install LaTeX
+        run: uv run manimflow doctor --install
+
+      - name: Typecheck
+        run: uv run mypy
+
+      # The fixture lesson renders at low quality, and exports at 144p, except for a
+      # few final-quality tests.
+      - name: Test
+        run: uv run pytest

@@ -1,0 +1,128 @@
+# Plano da aula: os estados dos slides, na ordem, e as transições entre eles.
+#
+# Cada estado é uma imagem estática, o último quadro da cena indicada.
+# Cada transição é um vídeo curto, que começa no estado de antes e termina no
+# seguinte. Dois estados vizinhos sem transição são uma troca de slide sem vídeo.
+# Confira com: manimflow plan validate <pasta da aula>
+
+estados:
+  - id: S0
+    titulo: Diagrama da Terra
+    visivel: Eixos da Terra, a linha da Terra em x = 8 e o herói na origem.
+    cena: S0_Base
+
+  - id: S1
+    titulo: Eixos do herói
+    visivel: Os eixos oblíquos do herói, já em v = 0,6, sobre os eixos da Terra.
+    cena: S1_EixosHeroi
+
+  - id: S2
+    titulo: Reflexão
+    visivel: >-
+      A Emissão em (0, 0), o herói e a luz até a Reflexão, que aparece só com a
+      coordenada da Terra, (8, 8) em azul.
+    cena: S2_Reflexao
+
+  - id: S2b
+    titulo: Instante da Reflexão
+    visivel: >-
+      Em verde, o tracejado t_T = 8 da Reflexão até o herói, o relógio dele (6,4),
+      a vertical até o eixo x_T com 4,8 e as coordenadas (4,8, 8) do herói na Terra.
+    cena: S2b_InstanteReflexao
+
+  - id: S2c
+    titulo: Coordenadas do herói
+    visivel: >-
+      Sem o verde. Os tracejados laranja da Reflexão até os eixos do herói e a
+      coordenada dele, (4, 4) em laranja.
+    cena: S2c_CoordsHeroi
+
+  - id: S3
+    titulo: Colisão
+    visivel: >-
+      O raio refletido e o herói até a Colisão, com (6, 10) em azul e (0, 8) em
+      laranja. Todas as coordenadas e as projeções.
+    cena: S3_Colisao
+    comentarios:
+      - O rótulo "Colisão" está perto da borda de cima do quadro.
+
+  - id: S5
+    titulo: Simultaneidade
+    visivel: >-
+      A linha verde de simultaneidade do herói, de t_H = 0, até a Terra, com
+      t_T = 4,8 e 6,4 min-luz.
+    cena: S5_Simultaneidade
+
+  # O R parte do S3, não do S5. O slide volta para a imagem do S3 sem vídeo.
+  - id: S3v
+    titulo: De volta à Colisão
+    visivel: A mesma imagem do S3, para o boost começar dela.
+    cena: S3_Colisao
+
+  - id: R
+    titulo: Referencial do herói
+    visivel: >-
+      O diagrama no referencial do herói, com os eixos dele ortogonais e os da Terra
+      abertos para fora. A luz a 45°, a Terra vindo de x_H = 6,4 e os tracejados
+      verdes da Reflexão em t_H = 4 e x_H = 4.
+    cena: R_RefHeroi
+    comentarios:
+      - Confirmar com o grupo que os eixos oblíquos vêm antes deste diagrama.
+
+transicoes:
+  - de: S0
+    para: S1
+    descricao: >-
+      A grade e os eixos do herói aparecem sobre os da Terra e se fecham de v = 0
+      até 0,6. Depois a grade some.
+    duracao: 4
+    cena: S1_EixosHeroi
+
+  - de: S1
+    para: S2
+    descricao: >-
+      A Emissão entra com um flash. O herói e a luz crescem juntos até a Reflexão,
+      sincronizados em t_T.
+    duracao: 4.7
+    cena: S2_Reflexao
+
+  - de: S2
+    para: S2b
+    descricao: >-
+      Em verde, nesta ordem: o tracejado horizontal em t_T = 8, o ponto do herói com
+      6,4, a vertical até o eixo x_T com 4,8 e, por último, (4,8, 8).
+    duracao: 3.5
+    cena: S2b_InstanteReflexao
+
+  - de: S2b
+    para: S2c
+    descricao: >-
+      O verde some. Entram os tracejados laranja de projeção da Reflexão e a
+      coordenada do herói, (4, 4).
+    duracao: 1.9
+    cena: S2c_CoordsHeroi
+
+  - de: S2c
+    para: S3
+    descricao: >-
+      O raio refletido e o trecho final do herói até a Colisão, que entra com as
+      coordenadas nos dois referenciais.
+    duracao: 2.6
+    cena: S3_Colisao
+
+  - de: S3
+    para: S5
+    descricao: >-
+      A linha verde "8 min-luz" sai de t_T = 0 e gira até t_H = 0, onde ganha os
+      rótulos t_T = 4,8 e 6,4 min-luz.
+    duracao: 4
+    cena: S5_Simultaneidade
+
+  - de: S3v
+    para: R
+    descricao: >-
+      Somem os textos dos eixos, as coordenadas e os nomes das linhas. Um boost de
+      Lorentz contínuo leva ao referencial do herói, e no fim entram os números, as
+      coordenadas do herói e os tracejados verdes da Reflexão.
+    duracao: 4.7
+    cena: R_RefHeroi
