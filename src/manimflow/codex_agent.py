@@ -34,6 +34,12 @@ from openai_codex.generated.v2_all import (
     Turn,
     TurnCompletedNotification,
     TurnStatus,
+    WindowsSandboxReadiness,
+    WindowsSandboxReadinessResponse,
+    WindowsSandboxSetupCompletedNotification,
+    WindowsSandboxSetupMode,
+    WindowsSandboxSetupStartParams,
+    WindowsSandboxSetupStartResponse,
 )
 from openai_codex.models import JsonObject, Notification
 from pydantic import BaseModel
@@ -98,7 +104,10 @@ class CodexAgent:
             scripts = sysconfig.get_path("scripts")
             path = os.pathsep.join([scripts, os.environ.get("PATH", "")])
             env = {"CODEX_HOME": str(self.home), "PATH": path}
-            self._codex = AsyncCodex(CodexConfig(env=env))
+            codex = AsyncCodex(CodexConfig(env=env))
+            if sys.platform == "win32":
+                await _set_up_windows_sandbox(codex)
+            self._codex = codex
         return self._codex
 
     async def start_session(self, lesson: Path) -> "CodexSession":
@@ -160,6 +169,31 @@ class CodexAgent:
         if self._codex is not None:
             await self._codex.close()
             self._codex = None
+
+
+async def _set_up_windows_sandbox(codex: AsyncCodex) -> None:
+    """Prepares Codex's Windows sandbox, once per Codex home.
+
+    Until it is set up, Codex refuses to run any command or patch rather than run
+    them unsandboxed. The unelevated mode needs no administrator prompt. The SDK
+    has no wrapper for these requests, so they go through its JSON-RPC client.
+    """
+    await codex._ensure_initialized()
+    client = codex._client
+    readiness = await client.request("windowsSandbox/readiness", None, response_model=WindowsSandboxReadinessResponse)
+    if readiness.status == WindowsSandboxReadiness.ready:
+        return
+    params = WindowsSandboxSetupStartParams(mode=WindowsSandboxSetupMode.unelevated)
+    await client.request(
+        "windowsSandbox/setupStart", params.model_dump(mode="json"), response_model=WindowsSandboxSetupStartResponse
+    )
+    while True:
+        notification = await client.next_notification()
+        if isinstance(notification.payload, WindowsSandboxSetupCompletedNotification):
+            break
+    if not notification.payload.success:
+        # The chat still works; Codex goes on refusing the agent's commands.
+        logger.warning("Windows sandbox setup failed: %s", notification.payload.error)
 
 
 class CodexSession:
