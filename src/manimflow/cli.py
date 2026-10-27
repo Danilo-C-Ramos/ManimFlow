@@ -23,8 +23,11 @@ from manimflow.render import render_scene
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="manimflow")
-    commands = parser.add_subparsers(dest="command", required=True)
+    parser = argparse.ArgumentParser(
+        prog="manimflow", description="Without a command, opens the ManimFlow app in the browser."
+    )
+    parser.add_argument("--demo", action="store_true", help="answer with the scripted demo agent")
+    commands = parser.add_subparsers(dest="command")
     for name, help_text in [
         ("preview", "render a scene at low quality"),
         ("render", "render a scene at final quality"),
@@ -103,6 +106,8 @@ def main(argv: list[str] | None = None) -> int:
     for stream in (sys.stdout, sys.stderr):
         if isinstance(stream, io.TextIOWrapper):
             stream.reconfigure(encoding="utf-8")
+    if args.command is None:
+        return _serve(args.demo)
     if args.command == "plan":
         return _plan_validate(args.lesson, args.json)
     if args.command == "doctor":
@@ -192,6 +197,19 @@ def _render(lesson: Path, scene: str, mode: str, as_json: bool) -> int:
     report = render_scene(lesson, scene, mode)
     details = [report.manim_output] if report.manim_output else []
     return _finish(report, as_json, [str(path) for path in report.files], details)
+
+
+def _serve(demo: bool) -> int:
+    # NiceGUI is slow to import, and the other commands run inside the agent's loop.
+    from manimflow.agent import Agent
+    from manimflow.app import example_copy, serve
+    from manimflow.codex_agent import CodexAgent, default_codex_home
+    from manimflow.fake_agent import DEMO, ScriptedAgent
+    from manimflow.paths import data_dir
+
+    agent: Agent = ScriptedAgent(DEMO, delay=0.6) if demo else CodexAgent(default_codex_home())
+    serve(agent, example_copy(data_dir()))
+    return 0
 
 
 def _export(

@@ -42,6 +42,7 @@ class PlanReport:
 class State:
     id: str
     scene: str
+    title: str
 
 
 @dataclass(frozen=True)
@@ -78,7 +79,7 @@ def load_plan(lesson: Path) -> tuple[Plan | None, list[str]]:
     if not report.ok:
         return None, report.errors
     plan = yaml.safe_load((report.lesson / PLAN_FILE).read_text(encoding="utf-8"))
-    states = [State(item["id"], item["cena"]) for item in plan["estados"]]
+    states = [State(item["id"], item["cena"], item["titulo"]) for item in plan["estados"]]
     transitions = [Transition(item["de"], item["para"], item["cena"]) for item in plan.get("transicoes") or []]
     return Plan(states, transitions), []
 

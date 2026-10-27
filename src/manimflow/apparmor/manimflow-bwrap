@@ -1,0 +1,12 @@
+# Lets the system bubblewrap create the user namespaces that Codex's Linux sandbox
+# needs, on Ubuntu 23.10 and later, which restrict them for every program without
+# a profile. Only /usr/bin/bwrap gets this; the restriction stays on for the rest.
+# See docs/adr/0002-linux-sandbox-on-ubuntu-uses-an-apparmor-profile.md.
+abi <abi/4.0>,
+include <tunables/global>
+
+profile manimflow-bwrap /usr/bin/bwrap flags=(unconfined) {
+  userns,
+
+  include if exists <local/manimflow-bwrap>
+}
