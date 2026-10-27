@@ -131,7 +131,7 @@ class CodexAgent:
     async def sandbox_problem(self) -> str | None:
         """Why the agent can't run commands, for the teacher; None when it can.
 
-        Waits until the sandbox is ready, which on Windows takes minutes the first time.
+        Waits until the sandbox is ready, which on Windows can take minutes the first time.
         """
         await self._client()
         assert self._sandbox is not None
@@ -139,6 +139,9 @@ class CodexAgent:
 
     async def start_session(self, lesson: Path) -> "CodexSession":
         codex = await self._client()
+        # A thread takes the sandbox config at its start; until setup ends, Codex
+        # blocks every command in it.
+        await self.sandbox_problem()
         thread = await codex.thread_start(
             cwd=str(lesson.absolute()),
             sandbox=Sandbox.workspace_write,

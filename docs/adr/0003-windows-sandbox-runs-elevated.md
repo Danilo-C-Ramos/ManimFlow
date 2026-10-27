@@ -13,7 +13,7 @@ A Windows CI probe (Codex 0.162.1, windows-latest) showed:
 
 ## Consequences
 
-- The sandbox is prepared in the background, so the first page doesn't wait for the administrator prompt or the read grants. The first message waits instead, for minutes on a large profile the first time.
+- The sandbox is prepared in the background, so the first page and the sign-in don't wait for the administrator prompt or the read grants. Opening the chat waits instead, because a Codex thread takes the sandbox config when it starts and blocks every command until setup ends. The first time, on a large profile, that wait can last minutes.
 - A teacher without administrator rights gets an agent that writes only inside the lesson but can reach the network. ManimFlow only logs this.
 - The network test skips loopback on Windows and checks an internet address instead, skipping when the machine itself has no internet.
 - Waiting on the mutex depends on a Codex internal. If Codex renames it, the wait ends at once and the first commands may start in `C:\` again. The Windows CI catches that.
