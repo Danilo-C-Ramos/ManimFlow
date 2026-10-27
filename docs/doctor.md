@@ -1,6 +1,6 @@
 # Doctor
 
-`manimflow doctor` checks what rendering needs and says in Portuguese what is missing. `manimflow doctor --install` first installs LaTeX for ManimFlow alone, into ManimFlow's data folder, without admin rights.
+`manimflow doctor` checks what rendering and the agent need and says in Portuguese what is missing. `manimflow doctor --install` first installs LaTeX for ManimFlow alone, into ManimFlow's data folder, without admin rights.
 
 ```
 manimflow doctor [--install] [--json]
@@ -16,8 +16,11 @@ Each check is `ok` or `falta`, with a sentence for the teacher.
 | `dvisvgm` | The `dvisvgm` program, which turns LaTeX output into the shapes Manim draws |
 | `latex-packages` | Manim's documented LaTeX packages, found with `kpsewhich` |
 | `manim`, `pycairo`, `manimpango`, `pyav` | The Python render stack imports |
+| `sandbox` | Linux only: bubblewrap, which Codex runs every agent command in, can start |
 
 The checks look where renders look: ManimFlow's TinyTeX first, then the PATH. A system LaTeX such as MiKTeX passes when it has every package. The package list is the one in Manim's installation docs, minus `ms`, which TeX Live retired.
+
+On Ubuntu 23.10 and later, `sandbox` fails until bubblewrap has ManimFlow's AppArmor profile, and its message gives the one-line command that installs both, as administrator. `--install` doesn't run it, because it needs `sudo`. The chat shows the same message instead of starting a turn. See `docs/adr/0002-linux-sandbox-on-ubuntu-uses-an-apparmor-profile.md`.
 
 The command exits non-zero when any check fails or the install fails.
 

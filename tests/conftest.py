@@ -10,6 +10,9 @@ from pathlib import Path
 import pytest
 import yaml
 
+from manimflow.codex_agent import CodexAgent
+from mock_model import MockModel
+
 FIXTURES = Path(__file__).parent / "fixtures"
 EXAMPLE = Path(str(files("manimflow"))) / "exemplos" / "relatividade"
 
@@ -70,6 +73,28 @@ def example(tmp_path) -> Path:
     path = tmp_path / "Relatividade - herói e espelho"
     shutil.copytree(EXAMPLE, path)
     return path
+
+
+@pytest.fixture
+def mock_model():
+    model = MockModel()
+    yield model
+    model.close()
+
+
+@pytest.fixture
+def codex_home(tmp_path, mock_model) -> Path:
+    """ManimFlow's Codex home, pointed at the local mock model."""
+    home = tmp_path / "codex"
+    mock_model.configure(home)
+    return home
+
+
+@pytest.fixture
+async def codex_agent(codex_home):
+    agent = CodexAgent(codex_home)
+    yield agent
+    await agent.close()
 
 
 def plan_scenes(lesson: Path) -> list[str]:
