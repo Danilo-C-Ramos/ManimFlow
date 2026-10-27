@@ -2,8 +2,8 @@
 
 The SDK starts the bundled Codex app-server once and keeps it for the app's
 lifetime. Every session is a new Codex thread rooted in the lesson folder, with
-the ManimFlow base instructions, a sandbox that only writes inside the lesson,
-no network and no approval prompts.
+the ManimFlow base instructions and skill, a sandbox that only writes inside
+the lesson, no network and no approval prompts.
 """
 
 import asyncio
@@ -17,7 +17,17 @@ from collections.abc import AsyncIterator, Callable, Sequence
 from importlib.resources import files
 from pathlib import Path
 
-from openai_codex import ApprovalMode, AsyncCodex, AsyncThread, CodexConfig, CodexError, Sandbox
+from openai_codex import (
+    ApprovalMode,
+    AsyncCodex,
+    AsyncThread,
+    CodexConfig,
+    CodexError,
+    InputItem,
+    Sandbox,
+    SkillInput,
+    TextInput,
+)
 from openai_codex.async_client import AsyncCodexClient
 from openai_codex.generated.v2_all import (
     AddPatchChangeKind,
@@ -64,6 +74,9 @@ from manimflow.agent import (
 logger = logging.getLogger(__name__)
 
 BASE_INSTRUCTIONS = (files("manimflow") / "agent_instructions.md").read_text(encoding="utf-8")
+# How to use the manimflow CLI and the self-check loop, as a Codex skill.
+SKILL_NAME = "manimflow"
+SKILL = files("manimflow") / "skills" / SKILL_NAME / "SKILL.md"
 
 # Codex config for every thread. By default workspace_write also lets the agent
 # write to the temp folders, and the model may search the web; the lesson
@@ -109,6 +122,7 @@ class CodexAgent:
         if self._codex is None:
             # The app-server refuses to start when its home is missing.
             self.home.mkdir(parents=True, exist_ok=True)
+            self._install_skill()
             # `uvx manimflow` doesn't put its environment on PATH, and the agent
             # renders through the `manimflow` script that lives there.
             scripts = sysconfig.get_path("scripts")
@@ -119,6 +133,16 @@ class CodexAgent:
             self._codex = codex
             self._sandbox = asyncio.create_task(self._prepare_sandbox(codex, path))
         return self._codex
+
+    @property
+    def skill(self) -> Path:
+        """Where the skill lives in the Codex home; Codex only loads skills from its skill folders."""
+        return self.home / "skills" / SKILL_NAME / "SKILL.md"
+
+    def _install_skill(self) -> None:
+        # Rewritten on every start, so an upgraded ManimFlow brings its skill along.
+        self.skill.parent.mkdir(parents=True, exist_ok=True)
+        self.skill.write_text(SKILL.read_text(encoding="utf-8"), encoding="utf-8")
 
     async def _prepare_sandbox(self, codex: AsyncCodex, path: str) -> str | None:
         if sys.platform == "win32":
@@ -261,6 +285,7 @@ class CodexSession:
         self.lesson = lesson
         self._thread = thread
         self._agent = agent
+        self._started = False
 
     async def send(self, text: str, attachments: Sequence[Path] = ()) -> AsyncIterator[Event]:
         # Every command would fail inside a sandbox that can't start, so the turn
@@ -272,9 +297,13 @@ class CodexSession:
         parts = [text] + [
             f"Anexo {path.name}:\n\n{path.read_text(encoding='utf-8')}" for path in attachments
         ]
-        handle = await self._thread.turn(
-            "\n\n".join(parts), model=settings.model, effort=ReasoningEffort(settings.effort)
-        )
+        message: list[InputItem] = [TextInput("\n\n".join(parts))]
+        if not self._started:
+            # Codex puts the skill's text into the thread itself, so the agent has it
+            # without reading the file, and later turns keep it in the history.
+            message.insert(0, SkillInput(SKILL_NAME, str(self._agent.skill)))
+            self._started = True
+        handle = await self._thread.turn(message, model=settings.model, effort=ReasoningEffort(settings.effort))
         async for notification in handle.stream():
             for event in _events(notification, self.lesson):
                 yield event
