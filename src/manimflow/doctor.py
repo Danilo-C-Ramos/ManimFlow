@@ -1,17 +1,18 @@
-"""Checks what rendering needs and explains, in Portuguese, what is missing; on request,
-installs ManimFlow's own TinyTeX first."""
+"""Checks what rendering and the agent need and explains, in Portuguese, what is missing;
+on request, installs ManimFlow's own TinyTeX first."""
 
 import importlib
 import importlib.metadata
 import os
 import shutil
 import subprocess
+import sys
 import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from manimflow import tinytex
+from manimflow import linux_sandbox, tinytex
 
 INSTALL_HINT = (
     "Rode `manimflow doctor --install` para instalar o TinyTeX na sua pasta de usuário, "
@@ -67,7 +68,7 @@ class DoctorReport:
 
 def doctor(install: bool, progress: Callable[[str], None]) -> DoctorReport:
     """Checks LaTeX, dvisvgm, Manim's LaTeX packages and the Python render stack, as the
-    render subprocesses would find them. With `install`, first installs ManimFlow's TinyTeX
+    render subprocesses would find them, and on Linux the agent's sandbox. With `install`, first installs ManimFlow's TinyTeX
     and the packages it lacks, reporting each step to `progress`."""
     started = time.perf_counter()
     report = DoctorReport(install=install, tinytex=tinytex.root())
@@ -86,6 +87,8 @@ def doctor(install: bool, progress: Callable[[str], None]) -> DoctorReport:
         _packages(path),
         *(_module(*entry) for entry in PYTHON_STACK),
     ]
+    if sys.platform.startswith("linux"):
+        report.checks.append(_sandbox())
     report.duration_s = time.perf_counter() - started
     return report
 
@@ -119,6 +122,12 @@ def _packages(path: str) -> Check:
         f"Faltam pacotes LaTeX que o Manim usa: {', '.join(missing)}. {INSTALL_HINT}",
         missing=missing,
     )
+
+
+def _sandbox() -> Check:
+    if problem := linux_sandbox.problem(os.environ.get("PATH", "")):
+        return Check("sandbox", False, problem)
+    return Check("sandbox", True, "O isolamento que mantém o agente dentro da pasta da aula abre.")
 
 
 def _module(module: str, distribution: str, label: str) -> Check:

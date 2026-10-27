@@ -12,7 +12,7 @@ from manimflow.agent import (
     FileChanged,
     ModelSettings,
 )
-from manimflow.codex_agent import BASE_INSTRUCTIONS
+from manimflow.codex_agent import BASE_INSTRUCTIONS, CodexAgent
 from mock_model import command, message, patch
 
 
@@ -199,6 +199,17 @@ async def test_a_failed_turn_is_explained_in_portuguese(codex_agent, mock_model,
     events = await turn(await codex_agent.start_session(lesson))
 
     assert events == [AgentError(explanation)]
+
+
+async def test_a_sandbox_that_cant_start_stops_the_turn_before_the_model(codex_home, mock_model, lesson):
+    agent = CodexAgent(codex_home, sandbox_problem=lambda path: "O Ubuntu bloqueia o isolamento.")
+    try:
+        events = await turn(await agent.start_session(lesson))
+    finally:
+        await agent.close()
+
+    assert events == [AgentError("O Ubuntu bloqueia o isolamento.")]
+    assert mock_model.requests == []
 
 
 def model_used(request):

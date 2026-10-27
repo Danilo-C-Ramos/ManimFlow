@@ -44,6 +44,7 @@ from openai_codex.generated.v2_all import (
 from openai_codex.models import JsonObject, Notification
 from pydantic import BaseModel
 
+from manimflow import linux_sandbox
 from manimflow.agent import (
     Account,
     AgentError,
@@ -88,10 +89,21 @@ def default_codex_home() -> Path:
 
 
 class CodexAgent:
-    def __init__(self, home: Path, open_browser: Callable[[str], object] = webbrowser.open) -> None:
-        """`home` is the Codex home that holds ManimFlow's login, config and threads."""
+    def __init__(
+        self,
+        home: Path,
+        open_browser: Callable[[str], object] = webbrowser.open,
+        sandbox_problem: Callable[[str], str | None] = linux_sandbox.problem,
+    ) -> None:
+        """`home` is the Codex home that holds ManimFlow's login, config and threads.
+
+        `sandbox_problem` says, given the agent's PATH, why the Linux sandbox can't start.
+        """
         self.home = home.absolute()
         self._open_browser = open_browser
+        self._check_sandbox = sandbox_problem
+        # Why the agent can't run commands, for the teacher; None when it can.
+        self.sandbox_problem: str | None = None
         self._codex: AsyncCodex | None = None
         self._settings: ModelSettings | None = None
 
@@ -107,6 +119,9 @@ class CodexAgent:
             codex = AsyncCodex(CodexConfig(env=env))
             if sys.platform == "win32":
                 await _set_up_windows_sandbox(codex)
+            self.sandbox_problem = await asyncio.to_thread(self._check_sandbox, path)
+            if self.sandbox_problem:
+                logger.warning("Codex sandbox can't start: %s", self.sandbox_problem)
             self._codex = codex
         return self._codex
 
@@ -203,6 +218,11 @@ class CodexSession:
         self._agent = agent
 
     async def send(self, text: str, attachments: Sequence[Path] = ()) -> AsyncIterator[Event]:
+        # Every command would fail inside a sandbox that can't start, so the turn
+        # would only spend quota.
+        if self._agent.sandbox_problem:
+            yield AgentError(self._agent.sandbox_problem)
+            return
         settings = await self._agent.model_settings()
         parts = [text] + [
             f"Anexo {path.name}:\n\n{path.read_text(encoding='utf-8')}" for path in attachments
