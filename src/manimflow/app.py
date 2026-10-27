@@ -21,6 +21,7 @@ from manimflow.agent import (
     Session,
 )
 from manimflow.preview import PreviewPanel
+from manimflow.sessions import SessionHistory
 
 logger = logging.getLogger(__name__)
 
@@ -69,12 +70,14 @@ def lesson_page(agent: Agent, lesson: Path) -> Callable[[], Awaitable[None]]:
 
     async def page() -> None:
         ui.page_title(f"{lesson.name} · ManimFlow")
-        with ui.header().classes("items-center"):
+        with ui.header().classes("items-center justify-between") as header:
             ui.label(lesson.name).classes("text-lg")
         body = ui.column().classes("w-full")
 
         async def open_chat() -> None:
             session = await agent.start_session(lesson)
+            with header:
+                SessionHistory(agent, lesson, current=session)
             body.clear()
             with body, ui.row().classes("w-full no-wrap items-start gap-6"):
                 with ui.column().classes("w-1/2"):
