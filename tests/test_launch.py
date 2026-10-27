@@ -1,5 +1,3 @@
-import tempfile
-
 from nicegui import ui
 from nicegui.testing.user_simulation import user_simulation
 
@@ -8,9 +6,13 @@ from conftest import EXAMPLE
 
 
 def launch(monkeypatch, tmp_path, *args):
-    """Runs `manimflow` without starting a server and returns what it passed to ui.run."""
+    """Runs `manimflow` without starting a server and returns what it passed to ui.run.
+
+    ManimFlow's own folder is `tmp_path / "dados" / "ManimFlow"`.
+    """
     calls = []
-    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "dados"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "dados"))
     with monkeypatch.context() as patch:
         patch.setattr(ui, "run", lambda root, **options: calls.append((root, options)))
         assert main(list(args)) == 0
@@ -27,16 +29,22 @@ def test_serves_only_on_localhost_and_opens_the_browser(monkeypatch, tmp_path):
 
 
 async def test_the_app_runs_codex_in_its_own_home_and_asks_to_sign_in(monkeypatch, tmp_path):
-    data = tmp_path / "dados"
-    monkeypatch.setenv("LOCALAPPDATA", str(data))
-    monkeypatch.setenv("XDG_DATA_HOME", str(data))
     root, _ = launch(monkeypatch, tmp_path)
 
     async with user_simulation(root=root) as user:
         await user.open("/")
         await user.should_see("Entrar com o ChatGPT")
 
-    assert (data / "ManimFlow" / "codex").is_dir()
+    assert (tmp_path / "dados" / "ManimFlow" / "codex").is_dir()
+
+
+async def test_the_example_opens_from_manimflows_folder_and_starts_fresh_every_launch(monkeypatch, tmp_path):
+    # Codex's Windows sandbox never lets the agent into the temp folder.
+    example = tmp_path / "dados" / "ManimFlow" / "exemplo" / "Relatividade - herói e espelho"
+    for _ in range(2):
+        launch(monkeypatch, tmp_path, "--demo")
+        assert sorted(path.name for path in example.iterdir()) == sorted(path.name for path in EXAMPLE.iterdir())
+        (example / "rascunho.md").write_text("da última vez", encoding="utf-8")
 
 
 async def test_demo_opens_a_copy_of_the_bundled_example_with_the_scripted_agent(monkeypatch, tmp_path):

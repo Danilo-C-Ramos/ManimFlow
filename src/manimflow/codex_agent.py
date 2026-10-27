@@ -7,6 +7,7 @@ no network and no approval prompts.
 """
 
 import asyncio
+import ctypes
 import logging
 import os
 import sys
@@ -17,12 +18,15 @@ from importlib.resources import files
 from pathlib import Path
 
 from openai_codex import ApprovalMode, AsyncCodex, AsyncThread, CodexConfig, CodexError, Sandbox
+from openai_codex.async_client import AsyncCodexClient
 from openai_codex.generated.v2_all import (
     AddPatchChangeKind,
     AgentMessageThreadItem,
     ApiKeyAccount,
     ChatgptAccount,
     CodexErrorInfoValue,
+    CommandExecParams,
+    CommandExecResponse,
     CommandExecutionThreadItem,
     DeletePatchChangeKind,
     FileChangeThreadItem,
@@ -44,7 +48,7 @@ from openai_codex.generated.v2_all import (
 from openai_codex.models import JsonObject, Notification
 from pydantic import BaseModel
 
-from manimflow import linux_sandbox
+from manimflow import linux_sandbox, paths
 from manimflow.agent import (
     Account,
     AgentError,
@@ -79,13 +83,7 @@ def default_codex_home() -> Path:
 
     See docs/adr/0001-manimflow-has-its-own-codex-home.md.
     """
-    if sys.platform == "win32":
-        base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
-    elif sys.platform == "darwin":
-        base = Path.home() / "Library" / "Application Support"
-    else:
-        base = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
-    return base / "ManimFlow" / "codex"
+    return paths.data_dir() / "codex"
 
 
 class CodexAgent:
@@ -102,9 +100,9 @@ class CodexAgent:
         self.home = home.absolute()
         self._open_browser = open_browser
         self._check_sandbox = sandbox_problem
-        # Why the agent can't run commands, for the teacher; None when it can.
-        self.sandbox_problem: str | None = None
         self._codex: AsyncCodex | None = None
+        # Readies the sandbox in the background, so the first page doesn't wait for it.
+        self._sandbox: asyncio.Task[str | None] | None = None
         self._settings: ModelSettings | None = None
 
     async def _client(self) -> AsyncCodex:
@@ -117,13 +115,27 @@ class CodexAgent:
             path = os.pathsep.join([scripts, os.environ.get("PATH", "")])
             env = {"CODEX_HOME": str(self.home), "PATH": path}
             codex = AsyncCodex(CodexConfig(env=env))
-            if sys.platform == "win32":
-                await _set_up_windows_sandbox(codex)
-            self.sandbox_problem = await asyncio.to_thread(self._check_sandbox, path)
-            if self.sandbox_problem:
-                logger.warning("Codex sandbox can't start: %s", self.sandbox_problem)
+            await codex._ensure_initialized()
             self._codex = codex
+            self._sandbox = asyncio.create_task(self._prepare_sandbox(codex, path))
         return self._codex
+
+    async def _prepare_sandbox(self, codex: AsyncCodex, path: str) -> str | None:
+        if sys.platform == "win32":
+            await _set_up_windows_sandbox(codex, self.home)
+        problem = await asyncio.to_thread(self._check_sandbox, path)
+        if problem:
+            logger.warning("Codex sandbox can't start: %s", problem)
+        return problem
+
+    async def sandbox_problem(self) -> str | None:
+        """Why the agent can't run commands, for the teacher; None when it can.
+
+        Waits until the sandbox is ready, which on Windows takes minutes the first time.
+        """
+        await self._client()
+        assert self._sandbox is not None
+        return await self._sandbox
 
     async def start_session(self, lesson: Path) -> "CodexSession":
         codex = await self._client()
@@ -181,24 +193,40 @@ class CodexAgent:
         return await self.account()
 
     async def close(self) -> None:
+        if self._sandbox is not None:
+            self._sandbox.cancel()
+            self._sandbox = None
         if self._codex is not None:
             await self._codex.close()
             self._codex = None
 
 
-async def _set_up_windows_sandbox(codex: AsyncCodex) -> None:
-    """Prepares Codex's Windows sandbox, once per Codex home.
+async def _set_up_windows_sandbox(codex: AsyncCodex, home: Path) -> None:
+    """Prepares Codex's Windows sandbox, and waits until it can enter the teacher's folders.
 
-    Until it is set up, Codex refuses to run any command or patch rather than run
-    them unsandboxed. The unelevated mode needs no administrator prompt. The SDK
-    has no wrapper for these requests, so they go through its JSON-RPC client.
+    See docs/adr/0003-windows-sandbox-runs-elevated.md. The SDK has no wrapper for
+    these requests, so they go through its JSON-RPC client.
     """
-    await codex._ensure_initialized()
     client = codex._client
     readiness = await client.request("windowsSandbox/readiness", None, response_model=WindowsSandboxReadinessResponse)
-    if readiness.status == WindowsSandboxReadiness.ready:
-        return
-    params = WindowsSandboxSetupStartParams(mode=WindowsSandboxSetupMode.unelevated)
+    if readiness.status != WindowsSandboxReadiness.ready:
+        # Only the elevated mode cuts the network. It asks for administrator once;
+        # without it, the unelevated mode still keeps writes inside the lesson.
+        if not await _windows_sandbox_setup(client, WindowsSandboxSetupMode.elevated):
+            await _windows_sandbox_setup(client, WindowsSandboxSetupMode.unelevated)
+    # Codex grants the sandbox read access to the teacher's folders in a helper that
+    # it starts with the first command and doesn't wait for. Until the helper ends,
+    # commands start in C:\ instead of the lesson.
+    params = CommandExecParams(command=["cmd", "/c", "exit"], cwd=str(home))
+    await client.request(
+        "command/exec", params.model_dump(mode="json", by_alias=True, exclude_none=True), response_model=CommandExecResponse
+    )
+    while await asyncio.to_thread(_windows_read_grants_running):
+        await asyncio.sleep(1)
+
+
+async def _windows_sandbox_setup(client: AsyncCodexClient, mode: WindowsSandboxSetupMode) -> bool:
+    params = WindowsSandboxSetupStartParams(mode=mode)
     await client.request(
         "windowsSandbox/setupStart", params.model_dump(mode="json"), response_model=WindowsSandboxSetupStartResponse
     )
@@ -207,8 +235,22 @@ async def _set_up_windows_sandbox(codex: AsyncCodex) -> None:
         if isinstance(notification.payload, WindowsSandboxSetupCompletedNotification):
             break
     if not notification.payload.success:
-        # The chat still works; Codex goes on refusing the agent's commands.
-        logger.warning("Windows sandbox setup failed: %s", notification.payload.error)
+        # Without any mode, Codex refuses to run the agent's commands; the chat still works.
+        logger.warning("Windows sandbox %s setup failed: %s", mode.value, notification.payload.error)
+    return notification.payload.success
+
+
+def _windows_read_grants_running() -> bool:
+    """Whether Codex's helper is still granting the sandbox read access, by its mutex."""
+    if sys.platform != "win32":
+        return False
+    synchronize = 0x00100000
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.OpenMutexW(synchronize, False, "Local\\CodexSandboxReadAcl")
+    if not handle:
+        return False
+    kernel32.CloseHandle(handle)
+    return True
 
 
 class CodexSession:
@@ -220,8 +262,8 @@ class CodexSession:
     async def send(self, text: str, attachments: Sequence[Path] = ()) -> AsyncIterator[Event]:
         # Every command would fail inside a sandbox that can't start, so the turn
         # would only spend quota.
-        if self._agent.sandbox_problem:
-            yield AgentError(self._agent.sandbox_problem)
+        if problem := await self._agent.sandbox_problem():
+            yield AgentError(problem)
             return
         settings = await self._agent.model_settings()
         parts = [text] + [

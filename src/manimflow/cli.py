@@ -205,9 +205,10 @@ def _serve(demo: bool) -> int:
     from manimflow.app import example_copy, serve
     from manimflow.codex_agent import CodexAgent, default_codex_home
     from manimflow.fake_agent import DEMO, ScriptedAgent
+    from manimflow.paths import data_dir
 
     agent: Agent = ScriptedAgent(DEMO, delay=0.6) if demo else CodexAgent(default_codex_home())
-    serve(agent, example_copy())
+    serve(agent, example_copy(data_dir()))
     return 0
 
 

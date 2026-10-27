@@ -1,8 +1,22 @@
 """The Codex adapter, run against the real bundled app-server and a local mock model."""
 
 import re
+import shutil
+import socket
+import sys
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from openai_codex.generated.v2_all import (
+    CommandExecResponse,
+    WindowsSandboxReadiness,
+    WindowsSandboxReadinessResponse,
+    WindowsSandboxSetupCompletedNotification,
+    WindowsSandboxSetupMode,
+    WindowsSandboxSetupStartResponse,
+)
+from openai_codex.models import Notification
 
 from manimflow.agent import (
     AgentError,
@@ -12,8 +26,24 @@ from manimflow.agent import (
     FileChanged,
     ModelSettings,
 )
-from manimflow.codex_agent import BASE_INSTRUCTIONS, CodexAgent
+from manimflow.codex_agent import BASE_INSTRUCTIONS, CodexAgent, _set_up_windows_sandbox
 from mock_model import command, message, patch
+
+
+@pytest.fixture
+def lesson(lesson):
+    """The fixture lesson, outside the temp folder on Windows, where teachers keep lessons.
+
+    Codex's Windows sandbox never lets the agent into the temp folder, where tmp_path lives.
+    """
+    if sys.platform != "win32":
+        yield lesson
+        return
+    moved = Path.home() / "ManimFlow testes" / lesson.parent.name / lesson.name
+    shutil.rmtree(moved.parent, ignore_errors=True)
+    shutil.copytree(lesson, moved)
+    yield moved
+    shutil.rmtree(moved.parent, ignore_errors=True)
 
 
 def developer_text(request):
@@ -147,10 +177,23 @@ async def test_the_agent_writes_only_inside_the_lesson(codex_agent, mock_model, 
     assert not [event for event in events if isinstance(event, FileChanged)]
 
 
-async def test_the_agent_has_no_network(codex_agent, mock_model, lesson):
+INTERNET = ("1.1.1.1", 443)
+
+
+@pytest.mark.parametrize("target", ["mock model", "internet"])
+async def test_the_agent_has_no_network(codex_agent, mock_model, lesson, target):
+    if target == "mock model":
+        if sys.platform == "win32":
+            pytest.skip("Codex's Windows sandbox blocks the network but not loopback")
+        host, port = mock_model.address
+    else:
+        host, port = INTERNET
+        try:
+            socket.create_connection(INTERNET, timeout=5).close()
+        except OSError:
+            pytest.skip("this machine has no internet either")
     # Codex offers web search to models outside its catalog.
     await codex_agent.set_model_settings(ModelSettings("sem-catalogo", "medium"))
-    host, port = mock_model.address
     mock_model.reply(
         command("c1", f"python -c \"import socket; socket.create_connection(('{host}', {port}), timeout=5)\""),
     )
@@ -226,3 +269,56 @@ async def test_turns_use_the_model_settings(codex_agent, mock_model, lesson):
     await turn(session)
     assert model_used(mock_model.requests[-1]) == ModelSettings("gpt-5.5", "high")
     assert await codex_agent.model_settings() == ModelSettings("gpt-5.5", "high")
+
+
+class FakeWindowsSandbox:
+    """The app-server's Windows sandbox requests, with an elevated setup that may fail."""
+
+    def __init__(self, readiness, elevated_works):
+        self.readiness = readiness
+        self.elevated_works = elevated_works
+        self.setups = []
+        self.commands = []
+        self._completed = []
+
+    async def request(self, method, params, response_model):
+        match method:
+            case "windowsSandbox/readiness":
+                return WindowsSandboxReadinessResponse(status=self.readiness)
+            case "windowsSandbox/setupStart":
+                mode = WindowsSandboxSetupMode(params["mode"])
+                self.setups.append(mode)
+                works = mode == WindowsSandboxSetupMode.unelevated or self.elevated_works
+                payload = WindowsSandboxSetupCompletedNotification(mode=mode, success=works)
+                self._completed.append(Notification("windowsSandbox/setupCompleted", payload))
+                return WindowsSandboxSetupStartResponse(started=True)
+            case "command/exec":
+                self.commands.append(params)
+                return CommandExecResponse(exitCode=0, stdout="", stderr="")
+
+    async def next_notification(self):
+        return self._completed.pop(0)
+
+
+@pytest.mark.parametrize(
+    ("readiness", "elevated_works", "setups"),
+    [
+        (WindowsSandboxReadiness.not_configured, True, [WindowsSandboxSetupMode.elevated]),
+        (
+            WindowsSandboxReadiness.not_configured,
+            False,
+            [WindowsSandboxSetupMode.elevated, WindowsSandboxSetupMode.unelevated],
+        ),
+        (WindowsSandboxReadiness.ready, True, []),
+    ],
+)
+async def test_the_windows_sandbox_prefers_elevated_and_falls_back_without_administrator(
+    tmp_path, readiness, elevated_works, setups
+):
+    sandbox = FakeWindowsSandbox(readiness, elevated_works)
+
+    await _set_up_windows_sandbox(SimpleNamespace(_client=sandbox), tmp_path)
+
+    assert sandbox.setups == setups
+    # One command through the sandbox, which starts Codex's read grants for the teacher's folders.
+    assert [command["cwd"] for command in sandbox.commands] == [str(tmp_path)]

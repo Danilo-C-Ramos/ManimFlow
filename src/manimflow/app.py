@@ -3,7 +3,6 @@
 import logging
 import shutil
 import socket
-import tempfile
 from collections.abc import Awaitable, Callable
 from importlib.resources import files
 from pathlib import Path
@@ -45,9 +44,15 @@ def serve(agent: Agent, lesson: Path) -> None:
     )
 
 
-def example_copy() -> Path:
-    """Copies the bundled example to a temporary folder, so the original stays pristine."""
-    lessons = Path(tempfile.mkdtemp(prefix="manimflow-"))
+def example_copy(data: Path) -> Path:
+    """Copies the bundled example to ManimFlow's folder `data`, fresh on every launch,
+    so the original stays pristine.
+
+    Not to the temp folder: Codex's Windows sandbox never lets the agent in there.
+    """
+    lessons = data / "exemplo"
+    shutil.rmtree(lessons, ignore_errors=True)
+    lessons.mkdir(parents=True)
     shutil.copy(EXAMPLES / "perfil.md", lessons)
     return Path(shutil.copytree(EXAMPLES / "relatividade", lessons / EXAMPLE_NAME))
 
