@@ -161,10 +161,13 @@ def _resolution(text: str) -> int:
     return value
 
 
+MAX_FPS = 120
+
+
 def _fps(text: str) -> int:
     value = int(text)
-    if not 1 <= value <= 120:
-        raise argparse.ArgumentTypeError("must be from 1 to 120")
+    if not 1 <= value <= MAX_FPS:
+        raise argparse.ArgumentTypeError(f"must be from 1 to {MAX_FPS}")
     return value
 
 

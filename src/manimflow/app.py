@@ -20,6 +20,7 @@ from manimflow.agent import (
     LoginFailed,
     Session,
 )
+from manimflow.export_tab import ExportPanel
 from manimflow.preview import PreviewPanel
 
 logger = logging.getLogger(__name__)
@@ -79,8 +80,15 @@ def lesson_page(agent: Agent, lesson: Path) -> Callable[[], Awaitable[None]]:
             with body, ui.row().classes("w-full no-wrap items-start gap-6"):
                 with ui.column().classes("w-1/2"):
                     Chat(session)
-                with ui.scroll_area().classes("w-1/2 h-[calc(100vh-6rem)]"):
-                    PreviewPanel(lesson)
+                with ui.column().classes("w-1/2 gap-0"):
+                    with ui.tabs() as tabs:
+                        preview_tab = ui.tab("Prévia")
+                        export_tab = ui.tab("Exportar")
+                    with ui.tab_panels(tabs, value=preview_tab).classes("w-full"):
+                        with ui.tab_panel(preview_tab), ui.scroll_area().classes("h-[calc(100vh-9rem)]"):
+                            PreviewPanel(lesson)
+                        with ui.tab_panel(export_tab):
+                            ExportPanel(lesson)
 
         if (await agent.account()).logged_in:
             await open_chat()
