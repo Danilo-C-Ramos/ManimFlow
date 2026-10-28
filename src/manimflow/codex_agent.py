@@ -14,6 +14,7 @@ import sys
 import sysconfig
 import webbrowser
 from collections.abc import AsyncIterator, Callable, Sequence
+from datetime import datetime
 from importlib.resources import files
 from pathlib import Path
 
@@ -46,9 +47,14 @@ from openai_codex.generated.v2_all import (
     ItemStartedNotification,
     PatchApplyStatus,
     ReasoningEffort,
+    SortDirection,
+    TextUserInput,
+    ThreadListCwdFilter,
+    ThreadSortKey,
     Turn,
     TurnCompletedNotification,
     TurnStatus,
+    UserMessageThreadItem,
     WindowsSandboxReadiness,
     WindowsSandboxReadinessResponse,
     WindowsSandboxSetupCompletedNotification,
@@ -70,7 +76,9 @@ from manimflow.agent import (
     FileChanged,
     ImageViewed,
     LoginFailed,
+    Message,
     ModelSettings,
+    PastSession,
 )
 
 logger = logging.getLogger(__name__)
@@ -176,6 +184,42 @@ class CodexAgent:
             config=THREAD_CONFIG,
         )
         return CodexSession(lesson, thread, self)
+
+    async def past_sessions(self, lesson: Path) -> list[PastSession]:
+        """The lesson's threads, found by the folder they started in, newest first."""
+        codex = await self._client()
+        sessions: list[PastSession] = []
+        cursor: str | None = None
+        while True:
+            page = await codex.thread_list(
+                cwd=ThreadListCwdFilter(str(lesson.absolute())),
+                cursor=cursor,
+                sort_key=ThreadSortKey.created_at,
+                sort_direction=SortDirection.desc,
+            )
+            # A thread's preview is its first message; a thread without one never got a request.
+            sessions += [
+                PastSession(thread.id, datetime.fromtimestamp(thread.created_at), thread.preview)
+                for thread in page.data
+                if thread.preview
+            ]
+            if page.next_cursor is None:
+                return sessions
+            cursor = page.next_cursor
+
+    async def session_messages(self, session_id: str) -> list[Message]:
+        codex = await self._client()
+        thread = (await AsyncThread(codex, session_id).read(include_turns=True)).thread
+        messages: list[Message] = []
+        for past_turn in thread.turns:
+            for item in past_turn.items:
+                match item.root:
+                    case UserMessageThreadItem(content=content):
+                        text = "\n\n".join(part.root.text for part in content if isinstance(part.root, TextUserInput))
+                        messages.append(Message("teacher", text))
+                    case AgentMessageThreadItem(text=text):
+                        messages.append(Message("agent", text))
+        return messages
 
     async def model_settings(self) -> ModelSettings:
         if self._settings is None:
@@ -284,6 +328,7 @@ def _windows_read_grants_running() -> bool:
 
 class CodexSession:
     def __init__(self, lesson: Path, thread: AsyncThread, agent: CodexAgent) -> None:
+        self.id = thread.id
         self.lesson = lesson
         self._thread = thread
         self._agent = agent

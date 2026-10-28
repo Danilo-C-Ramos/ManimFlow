@@ -26,6 +26,7 @@ from manimflow.agent import (
     CommandStarted,
     FileChanged,
     ImageViewed,
+    Message,
     ModelSettings,
 )
 from manimflow.codex_agent import BASE_INSTRUCTIONS, SKILL, CodexAgent, _set_up_windows_sandbox
@@ -143,6 +144,45 @@ async def test_file_edits_are_reported_relative_to_the_lesson(codex_agent, mock_
         FileChanged("cenas.py", "modified"),
         FileChanged("notas/novo.md", "added"),
         FileChanged("rascunho.md", "deleted"),
+    ]
+
+
+async def test_past_sessions_are_the_lessons_threads_where_the_teacher_wrote(codex_agent, mock_model, lesson):
+    other = lesson.parent / "Outra aula"
+    other.mkdir()
+    mock_model.reply(message("Desenhei o espelho."))
+    mock_model.reply(message("Aumentei a fonte."))
+    mock_model.reply(message("Desenhei a onda."))
+    first = await codex_agent.start_session(lesson)
+    await turn(first, "desenha o espelho")
+    second = await codex_agent.start_session(lesson)
+    await turn(second, "aumenta a fonte")
+    await turn(await codex_agent.start_session(other), "desenha a onda")
+    await codex_agent.start_session(lesson)
+
+    sessions = await codex_agent.past_sessions(lesson)
+
+    assert [(past.id, past.first_request) for past in sessions] == [
+        (second.id, "aumenta a fonte"),
+        (first.id, "desenha o espelho"),
+    ]
+    assert sessions[1].started_at <= sessions[0].started_at
+
+
+async def test_a_past_session_returns_the_conversation_without_its_commands(codex_agent, mock_model, lesson):
+    mock_model.reply(message("Vou listar a pasta."), command("c1", "ls"))
+    mock_model.reply(message("Pronto."))
+    mock_model.reply(message("Fonte maior."))
+    session = await codex_agent.start_session(lesson)
+    await turn(session, "lista a pasta")
+    await turn(session, "aumenta a fonte")
+
+    assert await codex_agent.session_messages(session.id) == [
+        Message("teacher", "lista a pasta"),
+        Message("agent", "Vou listar a pasta."),
+        Message("agent", "Pronto."),
+        Message("teacher", "aumenta a fonte"),
+        Message("agent", "Fonte maior."),
     ]
 
 
