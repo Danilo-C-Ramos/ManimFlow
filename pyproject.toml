@@ -16,6 +16,7 @@ dependencies = [
     "nicegui>=3,<4",
     "openai-codex>=0.162,<0.163",
     "pyyaml>=6,<7",
+    "ruamel.yaml>=0.19,<0.20",
 ]
 
 [project.scripts]

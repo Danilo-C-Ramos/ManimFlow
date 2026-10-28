@@ -65,9 +65,11 @@ class ScriptedAgent:
         self._account = ACCOUNT if logged_in else Account(logged_in=False)
         # When set, every login attempt fails with this message.
         self._login_failure = login_failure
+        # Every message the teacher sent, in every session, in order.
+        self.messages: list[str] = []
 
     async def start_session(self, lesson: Path) -> "ScriptedSession":
-        return ScriptedSession(lesson, iter(self.scenario), self.delay)
+        return ScriptedSession(lesson, iter(self.scenario), self.delay, self.messages)
 
     async def account(self) -> Account:
         return self._account
@@ -89,12 +91,14 @@ class ScriptedAgent:
 
 
 class ScriptedSession:
-    def __init__(self, lesson: Path, turns: Iterator[list[Step]], delay: float) -> None:
+    def __init__(self, lesson: Path, turns: Iterator[list[Step]], delay: float, messages: list[str]) -> None:
         self.lesson = lesson
         self._turns = turns
         self._delay = delay
+        self._messages = messages
 
     async def send(self, text: str, attachments: Sequence[Path] = ()) -> AsyncIterator[Event]:
+        self._messages.append(text)
         turn = next(self._turns, None)
         if turn is None:
             yield AgentError("O roteiro do agente de demonstração acabou.")
