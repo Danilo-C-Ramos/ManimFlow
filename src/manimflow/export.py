@@ -199,7 +199,7 @@ def _write_files(slides: list[Slide], renders: Path, exported: Path, report: Exp
 def _write_video(slides: list[Slide], renders: Path, exported: Path, report: ExportReport) -> None:
     """One video of the transitions, named after the lesson."""
     if not slides:
-        report.errors.append("The plan has no transitions to put in a video")
+        report.errors.append("O plano não tem transições, então não há vídeo para montar.")
         return
     videos = [_transition_video(slide, renders, ".mp4", report) for slide in slides if isinstance(slide, Transition)]
     if report.errors:
@@ -301,7 +301,7 @@ def _transition_video(slide: Transition, renders: Path, suffix: str, report: Exp
     video = renders / f"{slide.scene}{suffix}"
     if video.is_file():
         return video
-    report.errors.append(f"Transition {slide.name} has no video: scene {slide.scene} plays no animation")
+    report.errors.append(f"A transição {slide.name} não tem vídeo: a cena {slide.scene} não anima nada.")
     return None
 
 

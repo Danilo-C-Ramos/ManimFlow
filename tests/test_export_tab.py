@@ -157,3 +157,17 @@ async def test_a_button_opens_the_folder_of_the_exported_files(lesson, monkeypat
         user.find("Abrir pasta").click()
 
     assert opened == [lesson / "saida" / "beamer"]
+
+
+async def test_a_lesson_without_transitions_is_told_in_portuguese_why_it_has_no_video(lesson):
+    plan = lesson / "plano.yaml"
+    plan.write_text(plan.read_text(encoding="utf-8").split("\ntransicoes:")[0], encoding="utf-8")
+
+    async with open_export_tab(lesson) as user:
+        choose(user, "Vídeo da aula inteira")
+        set_field(user, "resolution", 144)
+        set_field(user, "fps", 10)
+        user.find(marker="run-export").click()
+
+        await user.should_see("A exportação falhou", retries=600)
+        await user.should_see("O plano não tem transições, então não há vídeo para montar.")

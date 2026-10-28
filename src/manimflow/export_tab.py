@@ -187,8 +187,8 @@ def open_in_file_manager(folder: Path) -> None:
 
 
 def _show_failure(report: dict) -> None:
-    """What went wrong: the CLI's own messages are in Portuguese for the plan, and in
-    English, meant for the agent, for everything else."""
+    """What went wrong: the CLI's own messages are in Portuguese for problems in the plan
+    and the scenes, and in English, meant for the agent, for a scene that fails to render."""
     ui.label("A exportação falhou, e nenhum arquivo foi alterado.").classes("text-negative")
     if report.get("manim_output"):
         ui.label("Uma cena deu erro ao renderizar. Peça ao agente para corrigir.")
