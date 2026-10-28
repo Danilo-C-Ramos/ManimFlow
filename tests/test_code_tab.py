@@ -211,3 +211,18 @@ async def test_a_failed_commit_is_reported_and_the_preview_still_renders(tmp_pat
         await user.should_see("Prévia atualizada.", retries=600)
         await user.should_see("Não foi possível salvar uma versão desta mudança.")
         assert (lesson / "fisica.py").read_text(encoding="utf-8") == "VELOCIDADE = 1.0\nACELERACAO = 9.8\n"
+
+
+async def test_renderizar_warns_instead_of_saving_over_a_change_the_editor_has_not_seen_yet(tmp_path):
+    lesson = minimal_lesson(tmp_path)
+    async with open_lesson(lesson) as (user, _):
+        user.find("Código").click()
+        user.find(marker="code").type("# minha nota\n")
+
+        # Clicked before the editor's next look at the lesson.
+        (lesson / "fisica.py").write_text("VELOCIDADE = 2.0\n", encoding="utf-8")
+        user.find("Renderizar").click()
+
+        await user.should_see("fisica.py foi alterado fora do editor enquanto você o editava.")
+        assert (lesson / "fisica.py").read_text(encoding="utf-8") == "VELOCIDADE = 2.0\n"
+        assert editor(user).value == "VELOCIDADE = 1.0\n# minha nota\n"

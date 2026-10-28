@@ -118,9 +118,10 @@ class CodeTab:
         self.button.set_enabled(not (self.rendering or self.agent_working or self.conflicts))
 
     async def render(self) -> None:
+        # A change the editor hasn't looked at yet would be saved over without a warning.
+        self._reload()
         if not self.button.enabled:
             return
-        self.drafts[self.current] = self.editor.value
         self.rendering = True
         self._update_button()
         self.spinner.set_visibility(True)
