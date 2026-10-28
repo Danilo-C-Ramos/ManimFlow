@@ -24,7 +24,7 @@ Windows is the supported platform for v0.1. You need no administrator rights, an
    uvx manimflow doctor --install
    ```
 
-   This downloads TinyTeX and the LaTeX packages Manim uses into `%LOCALAPPDATA%\ManimFlow`. It takes a few minutes the first time. It then checks everything rendering needs and says in Portuguese what is still missing. Nothing changes in your PATH, so other programs don't see this LaTeX. Run `uvx manimflow doctor` later to check again.
+   This downloads TinyTeX and the LaTeX packages Manim uses into `%LOCALAPPDATA%\ManimFlow\TinyTeX`. LaTeX breaks on folders with spaces or accents, so if your user name has one (`C:\Users\José da Silva`), TinyTeX goes into `%ProgramData%\ManimFlow\TinyTeX` instead, shared by every user of the computer. It takes a few minutes the first time. It then checks everything rendering needs and says in Portuguese what is still missing. Nothing changes in your PATH, so other programs don't see this LaTeX. Run `uvx manimflow doctor` later to check again.
 
 3. Start ManimFlow:
 
@@ -58,7 +58,7 @@ Update with `uv tool upgrade manimflow`. With `uvx`, `uvx manimflow@latest` runs
 
 **Your own LaTeX.** If you already use MiKTeX or TeX Live, you can skip `doctor --install`. Run `uvx manimflow doctor`: it lists the LaTeX packages Manim needs that your distribution lacks. Install those with your distribution's package manager, such as MiKTeX Console, until `doctor` passes. See [docs/doctor.md](https://github.com/Danilo-C-Ramos/ManimFlow/blob/main/docs/doctor.md) for the checks and the package list.
 
-**Uninstall.** Run `uv tool uninstall manimflow` if you installed the tool, and `uv cache clean` to remove what `uvx` downloaded. Then delete `%LOCALAPPDATA%\ManimFlow`, which holds TinyTeX, the sign-in and the example lesson copy. Your own lesson folders stay where they are.
+**Uninstall.** Run `uv tool uninstall manimflow` if you installed the tool, and `uv cache clean` to remove what `uvx` downloaded. Then delete `%LOCALAPPDATA%\ManimFlow`, which holds the sign-in, the example lesson copy and usually TinyTeX, and `%ProgramData%\ManimFlow` if TinyTeX went there. Your own lesson folders stay where they are.
 
 ## macOS and Linux
 
