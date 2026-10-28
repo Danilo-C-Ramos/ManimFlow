@@ -8,7 +8,7 @@ import sys
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import quote, unquote
+from urllib.parse import quote
 
 from nicegui import ui
 from starlette.requests import Request
@@ -38,7 +38,7 @@ def app_root(agent: Agent, library: Library) -> Callable[[Request], Awaitable[No
             await lesson_page(agent, example)()
             return
         if path.startswith(_LESSON_ROUTE):
-            lesson = library.lesson(unquote(path.removeprefix(_LESSON_ROUTE)))
+            lesson = library.lesson(path.removeprefix(_LESSON_ROUTE))
             if lesson is not None:
                 await lesson_page(agent, lesson)()
             else:

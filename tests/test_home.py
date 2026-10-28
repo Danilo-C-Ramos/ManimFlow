@@ -295,3 +295,10 @@ async def test_a_new_lesson_renders_and_its_physics_test_passes(library, manimfl
 async def test_an_empty_folder_says_where_to_start(library):
     async with open_home(library) as user:
         assert labels(user, "lessons") == ['Nenhuma aula nesta pasta ainda. Comece por "+ Nova aula".']
+
+
+async def test_a_lesson_with_a_percent_sign_in_its_name_opens(library):
+    async with open_home(library) as user:
+        create_lesson(user, "100%eficiente")
+        await user.should_see(marker="message")
+        await user.should_see("100%eficiente")
