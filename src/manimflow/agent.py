@@ -47,13 +47,20 @@ class FileChanged:
 
 
 @dataclass(frozen=True)
+class ImageViewed:
+    """The agent looked at an image, such as a rendered frame; `path` is relative to the lesson folder."""
+
+    path: str
+
+
+@dataclass(frozen=True)
 class AgentError:
     """The turn failed; `message` explains why, for the teacher."""
 
     message: str
 
 
-Event = AssistantText | CommandStarted | CommandFinished | FileChanged | AgentError
+Event = AssistantText | CommandStarted | CommandFinished | FileChanged | ImageViewed | AgentError
 
 
 @dataclass(frozen=True)
@@ -93,9 +100,27 @@ class ModelOption:
     default_effort: str
 
 
+@dataclass(frozen=True)
+class Message:
+    """One message of a conversation, by the teacher or by the agent."""
+
+    author: Literal["teacher", "agent"]
+    text: str
+
+
+@dataclass(frozen=True)
+class PastSession:
+    """A lesson's earlier conversation, as the session list shows it."""
+
+    id: str
+    started_at: datetime
+    first_request: str
+
+
 class Session(Protocol):
     """One conversation thread about one lesson."""
 
+    id: str
     lesson: Path
 
     def send(self, text: str, attachments: Sequence[Path] = ()) -> AsyncIterator[Event]:
@@ -104,7 +129,17 @@ class Session(Protocol):
 
 
 class Agent(Protocol):
-    async def start_session(self, lesson: Path) -> Session: ...
+    async def start_session(self, lesson: Path) -> Session:
+        """Starts a new conversation about the lesson; it never resumes an old one."""
+        ...
+
+    async def past_sessions(self, lesson: Path) -> list[PastSession]:
+        """The lesson's sessions in which the teacher sent something, newest first."""
+        ...
+
+    async def session_messages(self, session_id: str) -> list[Message]:
+        """The messages of a past session, in order."""
+        ...
 
     async def account(self) -> Account: ...
 
