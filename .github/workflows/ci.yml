@@ -1,6 +1,10 @@
 name: CI
 
-on: push
+# Tags run CI through the release workflow instead.
+on:
+  push:
+    branches: ["**"]
+  workflow_call:
 
 jobs:
   test:
@@ -46,3 +50,6 @@ jobs:
       # few final-quality tests.
       - name: Test
         run: uv run pytest
+
+  package:
+    uses: ./.github/workflows/package.yml
