@@ -44,6 +44,14 @@ class Produce:
     content: bytes
 
 
+@dataclass(frozen=True)
+class Received:
+    """A message the teacher sent, with each attachment's name and content as sent."""
+
+    text: str
+    attachments: dict[str, str]
+
+
 Step = Event | EditFile | Produce | Exception
 Scenario = list[list[Step]]
 
@@ -65,9 +73,11 @@ class ScriptedAgent:
         self._account = ACCOUNT if logged_in else Account(logged_in=False)
         # When set, every login attempt fails with this message.
         self._login_failure = login_failure
+        # Every message sent to any of its sessions, in order.
+        self.received: list[Received] = []
 
     async def start_session(self, lesson: Path) -> "ScriptedSession":
-        return ScriptedSession(lesson, iter(self.scenario), self.delay)
+        return ScriptedSession(lesson, iter(self.scenario), self.delay, self.received)
 
     async def account(self) -> Account:
         return self._account
@@ -89,12 +99,15 @@ class ScriptedAgent:
 
 
 class ScriptedSession:
-    def __init__(self, lesson: Path, turns: Iterator[list[Step]], delay: float) -> None:
+    def __init__(self, lesson: Path, turns: Iterator[list[Step]], delay: float, received: list[Received]) -> None:
         self.lesson = lesson
         self._turns = turns
         self._delay = delay
+        self._received = received
 
     async def send(self, text: str, attachments: Sequence[Path] = ()) -> AsyncIterator[Event]:
+        # Read now, as the Codex adapter does, since the files may change after the message.
+        self._received.append(Received(text, {path.name: path.read_text(encoding="utf-8") for path in attachments}))
         turn = next(self._turns, None)
         if turn is None:
             yield AgentError("O roteiro do agente de demonstração acabou.")
