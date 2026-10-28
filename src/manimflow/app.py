@@ -2,10 +2,8 @@
 
 import logging
 import re
-import shutil
 import socket
 from collections.abc import Awaitable, Callable
-from importlib.resources import files
 from pathlib import Path
 
 from nicegui import app, ui
@@ -29,9 +27,6 @@ from manimflow.versioning import OUTSIDE_EDITS, History
 
 logger = logging.getLogger(__name__)
 
-EXAMPLES = Path(str(files("manimflow"))) / "exemplos"
-EXAMPLE_NAME = "Relatividade - herói e espelho"
-
 _FILE_CHANGES = {"added": "Arquivo criado", "modified": "Arquivo alterado", "deleted": "Arquivo apagado"}
 
 # The steps of the agent's self-check, named for the teacher above the raw command.
@@ -45,11 +40,11 @@ _STEPS = [
 ]
 
 
-def serve(agent: Agent, lesson: Path) -> None:
-    """Serves the lesson screen on localhost only and opens it in the default browser."""
+def serve(agent: Agent, root: Callable[..., Awaitable[None]]) -> None:
+    """Serves the app's `root` page on localhost only and opens it in the default browser."""
     app.on_shutdown(agent.close)
     ui.run(
-        lesson_page(agent, lesson),
+        root,
         host="127.0.0.1",
         port=_free_port(),
         show=True,
@@ -57,19 +52,6 @@ def serve(agent: Agent, lesson: Path) -> None:
         language="pt-BR",
         reload=False,
     )
-
-
-def example_copy(data: Path) -> Path:
-    """Copies the bundled example to ManimFlow's folder `data`, fresh on every launch,
-    so the original stays pristine.
-
-    Not to the temp folder: Codex's Windows sandbox never lets the agent in there.
-    """
-    lessons = data / "exemplo"
-    shutil.rmtree(lessons, ignore_errors=True)
-    lessons.mkdir(parents=True)
-    shutil.copy(EXAMPLES / "perfil.md", lessons)
-    return Path(shutil.copytree(EXAMPLES / "relatividade", lessons / EXAMPLE_NAME))
 
 
 def _free_port() -> int:
@@ -86,6 +68,7 @@ def lesson_page(agent: Agent, lesson: Path) -> Callable[[], Awaitable[None]]:
         ui.page_title(f"{lesson.name} · ManimFlow")
         history = History.open(lesson)
         with ui.header().classes("items-center justify-between"):
+            ui.button("Minhas aulas", icon="arrow_back", on_click=lambda: ui.navigate.to("/")).props("flat color=white")
             ui.label(lesson.name).classes("text-lg")
             controls = ui.row().classes("ml-auto items-center")
         body = ui.column().classes("w-full")

@@ -204,13 +204,15 @@ def _render(lesson: Path, scene: str, mode: str, as_json: bool) -> int:
 def _serve(demo: bool) -> int:
     # NiceGUI is slow to import, and the other commands run inside the agent's loop.
     from manimflow.agent import Agent
-    from manimflow.app import example_copy, serve
+    from manimflow.app import serve
     from manimflow.codex_agent import CodexAgent, default_codex_home
     from manimflow.fake_agent import DEMO, ScriptedAgent
+    from manimflow.home import app_root
+    from manimflow.lessons import Library
     from manimflow.paths import data_dir
 
     agent: Agent = ScriptedAgent(DEMO, delay=0.6) if demo else CodexAgent(default_codex_home())
-    serve(agent, example_copy(data_dir()))
+    serve(agent, app_root(agent, Library(data_dir())))
     return 0
 
 
