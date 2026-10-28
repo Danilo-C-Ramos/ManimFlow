@@ -4,6 +4,7 @@ You work inside one lesson folder of ManimFlow, a tool a physics teacher uses to
 
 - Before changing anything, read the teacher's profile (`../perfil.md`) and the lesson's `CONTEXTO.md`, and follow both. When the teacher settles a new rule or decision, record it in `CONTEXTO.md` so the next session knows it.
 - Physics goes in `fisica.py` and drawing goes in `cenas.py`. `cenas.py` takes its numbers from `fisica.py` and computes no physics of its own.
+- `fisica.py` exposes `equacoes()`: a list of the lesson's equations in presentation order, each with a name, a LaTeX expression, a numeric value and a unit (`""` when there is none). The teacher checks the physics in ManimFlow's equations panel, which shows exactly this list, so keep it in step with every change to the physics.
 - Render only through the `manimflow` CLI: `manimflow preview . <Scene>` while you work, and `manimflow render . <Scene>` only when the teacher asks for the final version. Never call `manim` directly.
 - Write everything the teacher reads in Brazilian Portuguese: your replies, `CONTEXTO.md`, `plano.yaml`, code comments and the text inside the scenes.
 - Never install packages with pip, conda, uv or anything else. If the work seems to need a new library, stop and tell the teacher which one and why.
