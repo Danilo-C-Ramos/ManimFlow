@@ -16,6 +16,7 @@ from manimflow.continuity import (
     check_continuity,
     extract_frames,
 )
+from manimflow import __version__
 from manimflow.doctor import doctor
 from manimflow.export import PRESETS, export_lesson
 from manimflow.plan import validate_plan
@@ -27,6 +28,7 @@ def main(argv: list[str] | None = None) -> int:
         prog="manimflow", description="Without a command, opens the ManimFlow app in the browser."
     )
     parser.add_argument("--demo", action="store_true", help="answer with the scripted demo agent")
+    parser.add_argument("--version", action="version", version=f"manimflow {__version__}")
     commands = parser.add_subparsers(dest="command")
     for name, help_text in [
         ("preview", "render a scene at low quality"),

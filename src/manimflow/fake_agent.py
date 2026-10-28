@@ -20,6 +20,7 @@ from manimflow.agent import (
     CommandStarted,
     Event,
     FileChanged,
+    ImageViewed,
     LoginFailed,
     Message,
     ModelSettings,
@@ -161,6 +162,7 @@ DEMO: Scenario = [
         EditFile("rascunho.md", "# Rascunho\n\nTrocar a cor da luz para amarelo.\n"),
         CommandStarted("1", "manimflow preview . S2_Reflexao"),
         CommandFinished("1", "manimflow preview . S2_Reflexao", 0),
+        ImageViewed("saida/previa/png/S2_Reflexao.png"),
         AssistantText("Renderizei a prévia de S2 e conferi o último quadro."),
     ],
     [

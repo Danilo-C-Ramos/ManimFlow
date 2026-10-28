@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from PIL import Image
 from openai_codex.generated.v2_all import (
     CommandExecResponse,
     WindowsSandboxReadiness,
@@ -24,11 +25,12 @@ from manimflow.agent import (
     CommandFinished,
     CommandStarted,
     FileChanged,
+    ImageViewed,
     Message,
     ModelSettings,
 )
-from manimflow.codex_agent import BASE_INSTRUCTIONS, CodexAgent, _set_up_windows_sandbox
-from mock_model import command, message, patch
+from manimflow.codex_agent import BASE_INSTRUCTIONS, SKILL, CodexAgent, _set_up_windows_sandbox
+from mock_model import command, message, patch, view_image
 
 
 @pytest.fixture
@@ -60,8 +62,8 @@ def developer_text(request):
 
 def user_text(request):
     """The text of the last message the teacher sent, as the model received it."""
-    (*_, last) = [item for item in request["input"] if item.get("role") == "user"]
-    return "\n".join(part["text"] for part in last["content"] if part.get("type") == "input_text")
+    (*_, last) = [text for text in user_messages(request) if not text.startswith("<skill>")]
+    return last
 
 
 async def turn(session, text="oi", attachments=()):
@@ -75,6 +77,29 @@ async def test_every_new_thread_receives_the_base_instructions(codex_agent, mock
     assert len(mock_model.requests) == 2
     for request in mock_model.requests:
         assert BASE_INSTRUCTIONS in developer_text(request)
+
+
+def user_messages(request):
+    """The text of every message the model received as the user's, in order."""
+    return [
+        "\n".join(part["text"] for part in item["content"] if part.get("type") == "input_text")
+        for item in request["input"]
+        if item.get("role") == "user"
+    ]
+
+
+async def test_every_new_thread_starts_with_the_manimflow_skill(codex_agent, mock_model, lesson):
+    body = SKILL.read_text(encoding="utf-8").split("---", 2)[2].strip()
+    for _ in range(2):
+        session = await codex_agent.start_session(lesson)
+        await turn(session, "primeira")
+        await turn(session, "segunda")
+
+    first, second, *_ = mock_model.requests
+    assert sum(body in text for text in user_messages(first)) == 1
+    # The skill stays in the thread's history; later turns don't send it again.
+    assert sum(body in text for text in user_messages(second)) == 1
+    assert sum(body in text for text in user_messages(mock_model.requests[2])) == 1
 
 
 async def test_commands_and_replies_become_interface_events_in_order(codex_agent, mock_model, lesson):
@@ -157,6 +182,24 @@ async def test_a_past_session_returns_the_conversation_without_its_commands(code
     ]
 
 
+async def test_the_frames_the_agent_looks_at_become_events(codex_agent, mock_model, lesson):
+    frame = lesson / "saida" / "previa" / "quadros" / "S0-S1_fim.png"
+    frame.parent.mkdir(parents=True)
+    Image.new("RGB", (8, 8), "white").save(frame)
+    mock_model.reply(view_image("v1", "saida/previa/quadros/S0-S1_fim.png"))
+    mock_model.reply(message("O quadro final está certo."))
+
+    events = await turn(await codex_agent.start_session(lesson))
+
+    assert events == [ImageViewed("saida/previa/quadros/S0-S1_fim.png"), AssistantText("O quadro final está certo.")]
+    assert any(
+        part.get("type") == "input_image"
+        for item in mock_model.requests[-1]["input"]
+        if item.get("call_id") == "v1" and "output" in item
+        for part in item["output"]
+    )
+
+
 def tool_names(request):
     """Names of every tool offered to the model, nested ones included."""
 
@@ -188,6 +231,21 @@ async def test_the_agent_can_run_the_manimflow_cli(codex_agent, mock_model, less
 
     code, output = shell_result(mock_model.requests[-1], "c1")
     assert code == 0, output
+
+
+async def test_the_agent_can_run_the_lessons_physics_tests(codex_agent, mock_model, lesson):
+    (lesson / "fisica.py").write_text("def equacoes():\n    return []\n", encoding="utf-8")
+    (lesson / "test_fisica.py").write_text(
+        "from fisica import equacoes\n\n\ndef test_equacoes():\n    assert equacoes() == []\n", encoding="utf-8"
+    )
+    # The command the agent instructions give.
+    mock_model.reply(command("c1", "python -m pytest -q -p no:cacheprovider test_fisica.py"))
+
+    await turn(await codex_agent.start_session(lesson))
+
+    code, output = shell_result(mock_model.requests[-1], "c1")
+    assert code == 0, output
+    assert "1 passed" in output
 
 
 def shell_result(request, call_id):

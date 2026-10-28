@@ -47,13 +47,20 @@ class FileChanged:
 
 
 @dataclass(frozen=True)
+class ImageViewed:
+    """The agent looked at an image, such as a rendered frame; `path` is relative to the lesson folder."""
+
+    path: str
+
+
+@dataclass(frozen=True)
 class AgentError:
     """The turn failed; `message` explains why, for the teacher."""
 
     message: str
 
 
-Event = AssistantText | CommandStarted | CommandFinished | FileChanged | AgentError
+Event = AssistantText | CommandStarted | CommandFinished | FileChanged | ImageViewed | AgentError
 
 
 @dataclass(frozen=True)

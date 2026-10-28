@@ -1,6 +1,7 @@
 """The NiceGUI app: the lesson screen with its chat. Every UI string is in Portuguese."""
 
 import logging
+import re
 import shutil
 import socket
 from collections.abc import Awaitable, Callable
@@ -17,11 +18,13 @@ from manimflow.agent import (
     CommandStarted,
     Event,
     FileChanged,
+    ImageViewed,
     LoginFailed,
     Session,
 )
 from manimflow.preview import PreviewPanel
 from manimflow.sessions import SessionHistory
+from manimflow.versioning import OUTSIDE_EDITS, History
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +32,16 @@ EXAMPLES = Path(str(files("manimflow"))) / "exemplos"
 EXAMPLE_NAME = "Relatividade - herói e espelho"
 
 _FILE_CHANGES = {"added": "Arquivo criado", "modified": "Arquivo alterado", "deleted": "Arquivo apagado"}
+
+# The steps of the agent's self-check, named for the teacher above the raw command.
+_STEPS = [
+    (re.compile(r"\bmanimflow\s+plan\s+validate\b"), "Validando o plano"),
+    (re.compile(r"\bmanimflow\s+preview\b"), "Renderizando a prévia"),
+    (re.compile(r"\bmanimflow\s+render\b"), "Renderizando a versão final"),
+    (re.compile(r"\bmanimflow\s+frames\b"), "Extraindo os quadros"),
+    (re.compile(r"\bmanimflow\s+check-continuity\b"), "Conferindo a continuidade"),
+    (re.compile(r"\bpytest\b.*\btest_fisica\.py\b"), "Rodando os testes de física"),
+]
 
 
 def serve(agent: Agent, lesson: Path) -> None:
@@ -70,6 +83,7 @@ def lesson_page(agent: Agent, lesson: Path) -> Callable[[], Awaitable[None]]:
 
     async def page() -> None:
         ui.page_title(f"{lesson.name} · ManimFlow")
+        history = History.open(lesson)
         with ui.header().classes("items-center justify-between") as header:
             ui.label(lesson.name).classes("text-lg")
         body = ui.column().classes("w-full")
@@ -81,7 +95,7 @@ def lesson_page(agent: Agent, lesson: Path) -> Callable[[], Awaitable[None]]:
             body.clear()
             with body, ui.row().classes("w-full no-wrap items-start gap-6"):
                 with ui.column().classes("w-1/2"):
-                    Chat(session)
+                    Chat(session, history)
                 with ui.scroll_area().classes("w-1/2 h-[calc(100vh-6rem)]"):
                     PreviewPanel(lesson)
 
@@ -152,8 +166,9 @@ class SignIn:
 
 
 class Chat:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, history: History) -> None:
         self.session = session
+        self.history = history
         with ui.column().classes("w-full max-w-3xl mx-auto h-[calc(100vh-6rem)]"):
             with ui.scroll_area().classes("grow w-full") as self.scroll:
                 self.conversation = ui.column().classes("w-full gap-2").mark("conversation")
@@ -179,6 +194,8 @@ class Chat:
         self._set_busy(True)
         with self.conversation, ui.chat_message(name="Você", sent=True):
             ui.label(text)
+        # So the agent's commit holds only what the agent changed.
+        self._save_version(lambda: self.history.commit_manual_edit(OUTSIDE_EDITS))
         try:
             async for event in self.session.send(text):
                 with self.conversation:
@@ -190,7 +207,19 @@ class Chat:
             with self.conversation:
                 _error_row("O agente parou por um erro inesperado.")
         finally:
+            # Even a failed turn may have changed files, and they must not be lost.
+            self._save_version(lambda: self.history.commit_agent_turn(text))
             self._set_busy(False)
+
+    def _save_version(self, commit: Callable[[], object]) -> None:
+        """Runs `commit`, telling the teacher when the version couldn't be saved; the
+        chat goes on either way."""
+        try:
+            commit()
+        except Exception:
+            logger.exception("Commit failed")
+            with self.conversation:
+                _error_row("Não foi possível salvar uma versão desta mudança.")
 
     def _set_busy(self, busy: bool) -> None:
         self.input.set_enabled(not busy)
@@ -204,6 +233,8 @@ class Chat:
                     ui.markdown(text)
             case CommandStarted(_, command):
                 with _event_row("terminal", "grey-7"):
+                    if step := _step(command):
+                        ui.label(step)
                     ui.label(command).classes("font-mono")
             case CommandFinished(_, command):
                 if event.ok:
@@ -215,8 +246,15 @@ class Chat:
             case FileChanged(path, change):
                 with _event_row("edit_document", "primary"):
                     ui.label(f"{_FILE_CHANGES[change]}: {path}")
+            case ImageViewed(path):
+                with _event_row("visibility", "primary"):
+                    ui.label(f"Olhou a imagem {Path(path).name}").tooltip(path)
             case AgentError(message):
                 _error_row(f"Erro do agente: {message}")
+
+
+def _step(command: str) -> str | None:
+    return next((step for pattern, step in _STEPS if pattern.search(command)), None)
 
 
 def _event_row(icon: str, color: str) -> ui.row:
