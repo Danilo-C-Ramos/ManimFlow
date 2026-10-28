@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from PIL import Image
 from openai_codex.generated.v2_all import (
     CommandExecResponse,
     WindowsSandboxReadiness,
@@ -24,10 +25,11 @@ from manimflow.agent import (
     CommandFinished,
     CommandStarted,
     FileChanged,
+    ImageViewed,
     ModelSettings,
 )
 from manimflow.codex_agent import BASE_INSTRUCTIONS, SKILL, CodexAgent, _set_up_windows_sandbox
-from mock_model import command, message, patch
+from mock_model import command, message, patch, view_image
 
 
 @pytest.fixture
@@ -138,6 +140,24 @@ async def test_file_edits_are_reported_relative_to_the_lesson(codex_agent, mock_
         FileChanged("notas/novo.md", "added"),
         FileChanged("rascunho.md", "deleted"),
     ]
+
+
+async def test_the_frames_the_agent_looks_at_become_events(codex_agent, mock_model, lesson):
+    frame = lesson / "saida" / "previa" / "quadros" / "S0-S1_fim.png"
+    frame.parent.mkdir(parents=True)
+    Image.new("RGB", (8, 8), "white").save(frame)
+    mock_model.reply(view_image("v1", "saida/previa/quadros/S0-S1_fim.png"))
+    mock_model.reply(message("O quadro final está certo."))
+
+    events = await turn(await codex_agent.start_session(lesson))
+
+    assert events == [ImageViewed("saida/previa/quadros/S0-S1_fim.png"), AssistantText("O quadro final está certo.")]
+    assert any(
+        part.get("type") == "input_image"
+        for item in mock_model.requests[-1]["input"]
+        if item.get("call_id") == "v1" and "output" in item
+        for part in item["output"]
+    )
 
 
 def tool_names(request):

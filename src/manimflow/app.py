@@ -1,6 +1,7 @@
 """The NiceGUI app: the lesson screen with its chat. Every UI string is in Portuguese."""
 
 import logging
+import re
 import shutil
 import socket
 from collections.abc import Awaitable, Callable
@@ -17,6 +18,7 @@ from manimflow.agent import (
     CommandStarted,
     Event,
     FileChanged,
+    ImageViewed,
     LoginFailed,
     Session,
 )
@@ -28,6 +30,16 @@ EXAMPLES = Path(str(files("manimflow"))) / "exemplos"
 EXAMPLE_NAME = "Relatividade - herói e espelho"
 
 _FILE_CHANGES = {"added": "Arquivo criado", "modified": "Arquivo alterado", "deleted": "Arquivo apagado"}
+
+# The steps of the agent's self-check, named for the teacher above the raw command.
+_STEPS = [
+    (re.compile(r"\bmanimflow\s+plan\s+validate\b"), "Validando o plano"),
+    (re.compile(r"\bmanimflow\s+preview\b"), "Renderizando a prévia"),
+    (re.compile(r"\bmanimflow\s+render\b"), "Renderizando a versão final"),
+    (re.compile(r"\bmanimflow\s+frames\b"), "Extraindo os quadros"),
+    (re.compile(r"\bmanimflow\s+check-continuity\b"), "Conferindo a continuidade"),
+    (re.compile(r"\bpytest\b.*\btest_fisica\.py\b"), "Rodando os testes de física"),
+]
 
 
 def serve(agent: Agent, lesson: Path) -> None:
@@ -201,6 +213,8 @@ class Chat:
                     ui.markdown(text)
             case CommandStarted(_, command):
                 with _event_row("terminal", "grey-7"):
+                    if step := _step(command):
+                        ui.label(step)
                     ui.label(command).classes("font-mono")
             case CommandFinished(_, command):
                 if event.ok:
@@ -212,8 +226,15 @@ class Chat:
             case FileChanged(path, change):
                 with _event_row("edit_document", "primary"):
                     ui.label(f"{_FILE_CHANGES[change]}: {path}")
+            case ImageViewed(path):
+                with _event_row("visibility", "primary"):
+                    ui.label(f"Olhou a imagem {Path(path).name}").tooltip(path)
             case AgentError(message):
                 _error_row(f"Erro do agente: {message}")
+
+
+def _step(command: str) -> str | None:
+    return next((step for pattern, step in _STEPS if pattern.search(command)), None)
 
 
 def _event_row(icon: str, color: str) -> ui.row:

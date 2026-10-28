@@ -41,6 +41,7 @@ from openai_codex.generated.v2_all import (
     DeletePatchChangeKind,
     FileChangeThreadItem,
     FileUpdateChange,
+    ImageViewThreadItem,
     ItemCompletedNotification,
     ItemStartedNotification,
     PatchApplyStatus,
@@ -67,6 +68,7 @@ from manimflow.agent import (
     CommandStarted,
     Event,
     FileChanged,
+    ImageViewed,
     LoginFailed,
     ModelSettings,
 )
@@ -326,6 +328,8 @@ def _events(notification: Notification, lesson: Path) -> list[Event]:
                     return [CommandFinished(run.id, _command(run), exit_code)]
                 case FileChangeThreadItem(status=PatchApplyStatus.completed, changes=changes):
                     return [_file_changed(change, lesson) for change in changes]
+                case ImageViewThreadItem(path=path):
+                    return [ImageViewed(_shown(path.root, lesson))]
         case TurnCompletedNotification(turn=turn) if turn.status != TurnStatus.completed:
             return [_turn_failed(turn)]
     return []
@@ -338,12 +342,16 @@ def _command(run: CommandExecutionThreadItem) -> str:
     return run.command
 
 
+def _shown(path: str, lesson: Path) -> str:
+    """A path as the teacher reads it: relative to the lesson when inside it."""
+    resolved = Path(path).resolve()
+    if resolved.is_relative_to(lesson.resolve()):
+        return resolved.relative_to(lesson.resolve()).as_posix()
+    return str(resolved)
+
+
 def _file_changed(change: FileUpdateChange, lesson: Path) -> FileChanged:
-    path = Path(change.path).resolve()
-    if path.is_relative_to(lesson.resolve()):
-        shown = path.relative_to(lesson.resolve()).as_posix()
-    else:
-        shown = str(path)
+    shown = _shown(change.path, lesson)
     match change.kind.root:
         case AddPatchChangeKind():
             return FileChanged(shown, "added")
