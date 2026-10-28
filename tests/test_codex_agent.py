@@ -94,11 +94,15 @@ async def test_every_new_thread_starts_with_the_manimflow_skill(codex_agent, moc
         await turn(session, "primeira")
         await turn(session, "segunda")
 
+    def skills_sent(request):
+        # Codex sends the file as written, and on Windows the installed copy has CRLF.
+        return sum(body in text.replace("\r\n", "\n") for text in user_messages(request))
+
     first, second, *_ = mock_model.requests
-    assert sum(body in text for text in user_messages(first)) == 1
+    assert skills_sent(first) == 1
     # The skill stays in the thread's history; later turns don't send it again.
-    assert sum(body in text for text in user_messages(second)) == 1
-    assert sum(body in text for text in user_messages(mock_model.requests[2])) == 1
+    assert skills_sent(second) == 1
+    assert skills_sent(mock_model.requests[2]) == 1
 
 
 async def test_commands_and_replies_become_interface_events_in_order(codex_agent, mock_model, lesson):
