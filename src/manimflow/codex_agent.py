@@ -14,6 +14,7 @@ import sys
 import sysconfig
 import webbrowser
 from collections.abc import AsyncIterator, Callable, Sequence
+from datetime import UTC, datetime
 from importlib.resources import files
 from pathlib import Path
 
@@ -31,9 +32,11 @@ from openai_codex.generated.v2_all import (
     DeletePatchChangeKind,
     FileChangeThreadItem,
     FileUpdateChange,
+    GetAccountRateLimitsResponse,
     ItemCompletedNotification,
     ItemStartedNotification,
     PatchApplyStatus,
+    RateLimitWindow,
     ReasoningEffort,
     Turn,
     TurnCompletedNotification,
@@ -58,8 +61,11 @@ from manimflow.agent import (
     Event,
     FileChanged,
     LoginFailed,
+    ModelOption,
     ModelSettings,
+    QuotaWindow,
 )
+from manimflow.model_presets import DEFAULT
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +109,7 @@ class CodexAgent:
         self._codex: AsyncCodex | None = None
         # Readies the sandbox in the background, so the first page doesn't wait for it.
         self._sandbox: asyncio.Task[str | None] | None = None
-        self._settings: ModelSettings | None = None
+        self._settings = DEFAULT
 
     async def _client(self) -> AsyncCodex:
         if self._codex is None:
@@ -151,12 +157,19 @@ class CodexAgent:
         )
         return CodexSession(lesson, thread, self)
 
+    async def models(self) -> list[ModelOption]:
+        codex = await self._client()
+        return [
+            ModelOption(
+                model.model,
+                model.display_name,
+                tuple(option.reasoning_effort.value for option in model.supported_reasoning_efforts),
+                model.default_reasoning_effort.value,
+            )
+            for model in (await codex.models()).data
+        ]
+
     async def model_settings(self) -> ModelSettings:
-        if self._settings is None:
-            codex = await self._client()
-            catalog = (await codex.models()).data
-            default = next(model for model in catalog if model.is_default)
-            self._settings = ModelSettings(default.model, default.default_reasoning_effort.value)
         return self._settings
 
     async def set_model_settings(self, settings: ModelSettings) -> None:
@@ -195,6 +208,25 @@ class CodexAgent:
             raise LoginFailed("O login com o ChatGPT não foi concluído. Tente de novo.")
         return await self.account()
 
+    async def logout(self) -> None:
+        codex = await self._client()
+        await codex.logout()
+
+    async def quota(self) -> list[QuotaWindow] | None:
+        if (await self.account()).method != "chatgpt":
+            return None
+        codex = await self._client()
+        # The SDK has no wrapper for this request.
+        try:
+            usage = await codex._client.request(
+                "account/rateLimits/read", None, response_model=GetAccountRateLimitsResponse
+            )
+        except CodexError as error:
+            logger.warning("Codex can't read the plan's usage: %s", error)
+            return None
+        limits = usage.rate_limits
+        return [_quota_window(window) for window in (limits.primary, limits.secondary) if window is not None]
+
     async def close(self) -> None:
         if self._sandbox is not None:
             self._sandbox.cancel()
@@ -202,6 +234,11 @@ class CodexAgent:
         if self._codex is not None:
             await self._codex.close()
             self._codex = None
+
+
+def _quota_window(window: RateLimitWindow) -> QuotaWindow:
+    resets_at = datetime.fromtimestamp(window.resets_at, UTC) if window.resets_at is not None else None
+    return QuotaWindow(window.used_percent, window.window_duration_mins, resets_at)
 
 
 async def _set_up_windows_sandbox(codex: AsyncCodex, home: Path) -> None:

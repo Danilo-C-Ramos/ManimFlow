@@ -7,6 +7,7 @@ the UI. Messages and errors that reach the teacher are in Portuguese.
 
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Literal, Protocol
 
@@ -62,6 +63,16 @@ class Account:
     email: str | None = None
 
 
+@dataclass(frozen=True)
+class QuotaWindow:
+    """How much of one of the ChatGPT plan's usage limits is spent."""
+
+    used_percent: int
+    # How long the limit's window lasts, such as 300 for five hours.
+    minutes: int | None
+    resets_at: datetime | None
+
+
 class LoginFailed(Exception):
     """Signing in failed; the message explains why, for the teacher."""
 
@@ -70,6 +81,16 @@ class LoginFailed(Exception):
 class ModelSettings:
     model: str
     effort: str
+
+
+@dataclass(frozen=True)
+class ModelOption:
+    """A model the account may use, with the reasoning efforts it accepts."""
+
+    model: str
+    name: str
+    efforts: tuple[str, ...]
+    default_effort: str
 
 
 class Session(Protocol):
@@ -92,6 +113,18 @@ class Agent(Protocol):
 
         Raises LoginFailed when the teacher can't be signed in.
         """
+        ...
+
+    async def logout(self) -> None:
+        """Signs out and deletes the stored credentials."""
+        ...
+
+    async def quota(self) -> list[QuotaWindow] | None:
+        """How much of the ChatGPT plan is used; None without a plan, as with an API key."""
+        ...
+
+    async def models(self) -> list[ModelOption]:
+        """The models the account may pick, in the engine's order."""
         ...
 
     async def model_settings(self) -> ModelSettings: ...

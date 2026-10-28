@@ -7,8 +7,9 @@ engine would.
 """
 
 import asyncio
-from collections.abc import AsyncIterator, Iterator, Sequence
+from collections.abc import AsyncIterator, Callable, Iterator, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from manimflow.agent import (
@@ -20,8 +21,11 @@ from manimflow.agent import (
     Event,
     FileChanged,
     LoginFailed,
+    ModelOption,
     ModelSettings,
+    QuotaWindow,
 )
+from manimflow.model_presets import DEFAULT
 
 
 @dataclass(frozen=True)
@@ -48,7 +52,14 @@ Step = Event | EditFile | Produce | Exception
 Scenario = list[list[Step]]
 
 ACCOUNT = Account(logged_in=True, method="chatgpt", email="professora@example.com")
-MODEL_SETTINGS = ModelSettings(model="gpt-5-codex", effort="medium")
+MODELS = [
+    ModelOption("gpt-6.1-sol", "GPT-6.1-Sol", ("low", "medium", "high", "xhigh"), "low"),
+    ModelOption("gpt-6-luna", "GPT-6-Luna", ("low", "medium", "high"), "medium"),
+]
+
+
+_SOON = datetime.now(UTC) + timedelta(hours=2)
+QUOTA = [QuotaWindow(5, 300, _SOON), QuotaWindow(80, 10080, _SOON + timedelta(days=3))]
 
 
 class ScriptedAgent:
@@ -65,9 +76,15 @@ class ScriptedAgent:
         self._account = ACCOUNT if logged_in else Account(logged_in=False)
         # When set, every login attempt fails with this message.
         self._login_failure = login_failure
+        self._settings = DEFAULT
+        # The model settings each turn ran with, in order, across sessions.
+        self.turn_settings: list[ModelSettings] = []
 
     async def start_session(self, lesson: Path) -> "ScriptedSession":
-        return ScriptedSession(lesson, iter(self.scenario), self.delay)
+        return ScriptedSession(lesson, iter(self.scenario), self.delay, self._start_turn)
+
+    def _start_turn(self) -> None:
+        self.turn_settings.append(self._settings)
 
     async def account(self) -> Account:
         return self._account
@@ -78,23 +95,36 @@ class ScriptedAgent:
         self._account = ACCOUNT if api_key is None else Account(logged_in=True, method="api_key")
         return self._account
 
+    async def logout(self) -> None:
+        self._account = Account(logged_in=False)
+
+    async def quota(self) -> list[QuotaWindow] | None:
+        return QUOTA if self._account.method == "chatgpt" else None
+
+    async def models(self) -> list[ModelOption]:
+        return MODELS
+
     async def model_settings(self) -> ModelSettings:
-        return MODEL_SETTINGS
+        return self._settings
 
     async def set_model_settings(self, settings: ModelSettings) -> None:
-        pass
+        self._settings = settings
 
     async def close(self) -> None:
         pass
 
 
 class ScriptedSession:
-    def __init__(self, lesson: Path, turns: Iterator[list[Step]], delay: float) -> None:
+    def __init__(
+        self, lesson: Path, turns: Iterator[list[Step]], delay: float, on_turn: Callable[[], None]
+    ) -> None:
         self.lesson = lesson
         self._turns = turns
         self._delay = delay
+        self._on_turn = on_turn
 
     async def send(self, text: str, attachments: Sequence[Path] = ()) -> AsyncIterator[Event]:
+        self._on_turn()
         turn = next(self._turns, None)
         if turn is None:
             yield AgentError("O roteiro do agente de demonstração acabou.")

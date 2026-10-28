@@ -27,6 +27,7 @@ from manimflow.agent import (
     ModelSettings,
 )
 from manimflow.codex_agent import BASE_INSTRUCTIONS, CodexAgent, _set_up_windows_sandbox
+from manimflow.model_presets import CAREFUL, QUICK
 from mock_model import command, message, patch
 
 
@@ -269,6 +270,20 @@ async def test_turns_use_the_model_settings(codex_agent, mock_model, lesson):
     await turn(session)
     assert model_used(mock_model.requests[-1]) == ModelSettings("gpt-5.5", "high")
     assert await codex_agent.model_settings() == ModelSettings("gpt-5.5", "high")
+
+
+async def test_turns_start_on_the_rapido_preset(codex_agent, mock_model, lesson):
+    await turn(await codex_agent.start_session(lesson))
+
+    assert model_used(mock_model.requests[-1]) == QUICK
+
+
+async def test_the_model_list_offers_the_presets(codex_agent):
+    models = {option.model: option for option in await codex_agent.models()}
+
+    assert QUICK.effort in models[QUICK.model].efforts
+    assert CAREFUL.effort in models[CAREFUL.model].efforts
+    assert all(option.default_effort in option.efforts for option in models.values())
 
 
 class FakeWindowsSandbox:

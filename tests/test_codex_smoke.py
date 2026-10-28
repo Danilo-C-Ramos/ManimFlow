@@ -80,3 +80,14 @@ async def test_the_agent_cannot_write_outside_the_lesson_or_reach_the_network(ag
     assert not (example_lesson.parent / "fora.txt").exists()
     assert (example_lesson / "tentou_rede.txt").exists()
     assert not (example_lesson / "rede.txt").exists()
+
+
+async def test_a_chatgpt_account_shows_its_plan_usage(agent):
+    if (await agent.account()).method != "chatgpt":
+        pytest.skip("ManimFlow is signed in with an API key, which has no plan quota.")
+
+    quota = await agent.quota()
+
+    print(quota)
+    assert quota
+    assert all(0 <= window.used_percent <= 100 and window.minutes for window in quota)

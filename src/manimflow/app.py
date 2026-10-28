@@ -21,6 +21,7 @@ from manimflow.agent import (
     Session,
 )
 from manimflow.preview import PreviewPanel
+from manimflow.settings import SettingsDialog, model_switch
 
 logger = logging.getLogger(__name__)
 
@@ -71,10 +72,14 @@ def lesson_page(agent: Agent, lesson: Path) -> Callable[[], Awaitable[None]]:
         ui.page_title(f"{lesson.name} · ManimFlow")
         with ui.header().classes("items-center"):
             ui.label(lesson.name).classes("text-lg")
+            controls = ui.row().classes("ml-auto items-center")
         body = ui.column().classes("w-full")
 
         async def open_chat() -> None:
             session = await agent.start_session(lesson)
+            controls.clear()
+            with controls:
+                SettingsDialog(agent, await model_switch(agent), on_signed_out=sign_in)
             body.clear()
             with body, ui.row().classes("w-full no-wrap items-start gap-6"):
                 with ui.column().classes("w-1/2"):
@@ -82,11 +87,16 @@ def lesson_page(agent: Agent, lesson: Path) -> Callable[[], Awaitable[None]]:
                 with ui.scroll_area().classes("w-1/2 h-[calc(100vh-6rem)]"):
                     PreviewPanel(lesson)
 
+        def sign_in() -> None:
+            controls.clear()
+            body.clear()
+            with body:
+                SignIn(agent, on_signed_in=open_chat)
+
         if (await agent.account()).logged_in:
             await open_chat()
         else:
-            with body:
-                SignIn(agent, on_signed_in=open_chat)
+            sign_in()
 
     return page
 
