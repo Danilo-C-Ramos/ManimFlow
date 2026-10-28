@@ -9,6 +9,7 @@ from manimflow.agent import AssistantText
 from manimflow.app import lesson_page
 from manimflow.equations import Equation
 from manimflow.fake_agent import EditFile, ScriptedAgent
+from manimflow.lessons import Library
 from conftest import EXAMPLE
 
 
@@ -192,3 +193,18 @@ async def test_physics_written_with_dataclasses_works(lesson):
     async with open_lesson(lesson) as user:
         await eventually(lambda: len(panel(user)) > 2)
         assert entries(user) == [("Velocidade", "fórmula v", "= 0.6 c")]
+
+
+async def test_a_new_lesson_uses_the_profile_it_gets_and_says_when_it_has_no_equations_yet(tmp_path):
+    library = Library(tmp_path / "dados")
+    library.set_folder(tmp_path / "Aulas Manim")
+    lesson = library.create("Aula 01")
+
+    async with open_lesson(lesson) as user:
+        await eventually(lambda: len(panel(user)) > 1 and panel(user)[1] != "Calculando as equações…")
+        assert panel(user) == ["Equações", "equacoes() ainda não devolve nenhuma equação."]
+
+        source = (lesson / "fisica.py").read_text(encoding="utf-8")
+        physics(lesson, source.replace("return []", "return [Equacao('Fator de Lorentz', r'\\gamma', 1.25, '')]"))
+
+        await eventually(lambda: entries(user) == [("Fator de Lorentz", r"fórmula \gamma", "= 1,25")])

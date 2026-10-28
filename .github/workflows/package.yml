@@ -1,0 +1,54 @@
+name: Package
+
+# Builds the package and runs it on a clean Windows runner the way a teacher would.
+# CI calls this on every push and the release workflow publishes what it builds.
+on: workflow_call
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0  # the version comes from the latest tag
+
+      - uses: astral-sh/setup-uv@v10.3.0  # no floating major tags since v8
+
+      - name: Build
+        run: uv build
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+
+  # No checkout and no `uv sync`: only uv and the built wheel, as on a teacher's computer.
+  try-on-windows:
+    needs: build
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: astral-sh/setup-uv@v10.3.0
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist
+
+      - name: uvx manimflow --help
+        run: uvx --from dist/*.whl manimflow --help
+
+      # A clean runner may lack LaTeX, so this check can fail, but it must still report.
+      - name: uvx manimflow doctor, before installing LaTeX
+        run: |
+          uvx --from dist/*.whl manimflow doctor --json > before.json || true
+          cat before.json
+          python -c "import json; r = json.load(open('before.json', encoding='utf-8')); assert r['command'] == 'doctor' and r['checks'], r"
+
+      - name: uvx manimflow doctor --install
+        run: uvx --from dist/*.whl manimflow doctor --install
+
+      - name: uvx manimflow doctor
+        run: uvx --from dist/*.whl manimflow doctor

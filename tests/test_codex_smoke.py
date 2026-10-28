@@ -80,3 +80,35 @@ async def test_the_agent_cannot_write_outside_the_lesson_or_reach_the_network(ag
     assert not (example_lesson.parent / "fora.txt").exists()
     assert (example_lesson / "tentou_rede.txt").exists()
     assert not (example_lesson / "rede.txt").exists()
+
+
+async def test_a_chatgpt_account_shows_its_plan_usage(agent):
+    if (await agent.account()).method != "chatgpt":
+        pytest.skip("ManimFlow is signed in with an API key, which has no plan quota.")
+
+    quota = await agent.quota()
+
+    print(quota)
+    assert quota
+    assert all(0 <= window.used_percent <= 100 and window.minutes for window in quota)
+
+
+async def test_a_request_that_breaks_continuity_is_fixed_or_reported(agent, example_lesson, manimflow):
+    # S2c starts from the full S2b image, so removing the green dashes only at the
+    # end of S2b makes the S2b-S2c video start on a different image than the slide.
+    events = await send(
+        agent,
+        example_lesson,
+        "Na cena S2b_InstanteReflexao, depois que as coordenadas (4,8, 8) aparecem, "
+        "apague o tracejado horizontal verde no fim da cena.",
+    )
+
+    assert any(isinstance(event, CommandFinished) and "check-continuity" in event.command for event in events)
+    for scene in ("S2_Reflexao", "S2b_InstanteReflexao", "S2c_CoordsHeroi"):
+        rendered = manimflow("preview", str(example_lesson), scene)
+        assert rendered.returncode == 0, rendered.stderr
+    check = manimflow("check-continuity", str(example_lesson), "S2-S2b", "S2b-S2c")
+    if check.returncode != 0:
+        # Not fixed within the 4 attempts: the agent must say what is still wrong.
+        (*_, last) = [event.text for event in events if isinstance(event, AssistantText)]
+        assert "S2b" in last, (last, check.stderr)

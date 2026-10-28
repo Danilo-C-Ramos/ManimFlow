@@ -24,6 +24,11 @@ def command(call_id: str, cmd: str) -> Item:
     return {"type": "function_call", "name": "exec_command", "call_id": call_id, "arguments": json.dumps({"cmd": cmd})}
 
 
+def view_image(call_id: str, path: str) -> Item:
+    """A call to Codex's image viewer, which sends the image back to the model."""
+    return {"type": "function_call", "name": "view_image", "call_id": call_id, "arguments": json.dumps({"path": path})}
+
+
 def patch(call_id: str, text: str) -> Item:
     """An apply_patch call; `text` holds the lines between Begin Patch and End Patch."""
     body = f"*** Begin Patch\n{text}*** End Patch\n"
