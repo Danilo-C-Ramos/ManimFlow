@@ -342,3 +342,38 @@ async def test_a_deleted_plan_leaves_no_cards(lesson):
 
         await eventually(lambda: cards(user) == ["Plano", "Esta aula ainda não tem plano."])
         await user.should_not_see("Aprovar plano")
+
+
+async def test_a_text_that_yaml_reads_as_a_number_or_yes_stays_a_text(manimflow, lesson):
+    async with open_lesson(lesson) as user:
+        edit(user, "titulo-S0", "1:30")
+        edit(user, "visivel-S0", "yes")
+        user.find(marker="comentario-S0").type("on")
+        user.find(marker="comentar-S0").click()
+
+    state = plan(lesson)["estados"][0]
+    assert (state["titulo"], state["visivel"], state["comentarios"]) == ("1:30", "yes", ["on"])
+    assert manimflow("plan", "validate", str(lesson)).returncode == 0
+
+
+async def test_approving_a_plan_the_agent_just_rewrote_does_not_overwrite_it(lesson):
+    agent = ScriptedAgent([[AssistantText("Sigo.")]])
+    async with open_lesson(lesson, agent) as user:
+        # The agent's new plan lands between two looks at the file.
+        (lesson / "plano.yaml").write_text(TWO_STATES, encoding="utf-8")
+        user.find("Aprovar plano").click()
+
+        await user.should_see("O plano mudou. Confira os cartões e aprove de novo.")
+        assert agent.messages == []
+        assert cards(user)[1:3] == ["A", "Título: Antes"]
+    assert (lesson / "plano.yaml").read_text(encoding="utf-8") == TWO_STATES
+
+
+async def test_an_edit_on_a_plan_the_agent_just_rewrote_is_not_written(lesson):
+    async with open_lesson(lesson) as user:
+        (lesson / "plano.yaml").write_text(TWO_STATES, encoding="utf-8")
+        user.find(marker="comentario-S0").type("Mais azul.")
+        user.find(marker="comentar-S0").click()
+
+        assert cards(user)[1:3] == ["A", "Título: Antes"]
+    assert (lesson / "plano.yaml").read_text(encoding="utf-8") == TWO_STATES

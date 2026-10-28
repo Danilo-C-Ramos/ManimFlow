@@ -12,10 +12,12 @@ import logging
 from pathlib import Path
 from typing import Any, Protocol
 
+import yaml
 from nicegui import ui
 from nicegui.events import ValueChangeEventArguments
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
+from ruamel.yaml.scalarstring import SingleQuotedScalarString
 from ruamel.yaml.tokens import CommentToken
 
 from manimflow.plan import PLAN_FILE, validate_plan
@@ -77,10 +79,11 @@ class PlanCards:
                         ui.image(url).classes("w-48 rounded")
                 self.thumbnails[state["id"]] = (slot, url)
 
-    def _refresh_plan(self) -> None:
+    def _refresh_plan(self) -> bool:
+        """Whether the cards were redrawn from the plan on disk."""
         stamp = tuple(_modified(self.lesson / name) for name in (PLAN_FILE, SCENES_FILE))
         if stamp == self._stamp:
-            return
+            return False
         self._stamp = stamp
         try:
             text: str | None = (self.lesson / PLAN_FILE).read_text(encoding="utf-8")
@@ -88,7 +91,7 @@ class PlanCards:
             text = None
         # The cards' own writes change nothing they show; the scenes file only matters to a plan that isn't valid yet.
         if text == self.text and (self.plan is not None or text is None):
-            return
+            return False
         if text != self.text:
             self.text = text
             self.approved = text or ""
@@ -100,12 +103,16 @@ class PlanCards:
             self.plan = None
         self.approve_button.set_visibility(self.plan is not None)
         self._build()
+        return True
 
     async def _approve(self) -> None:
         if self.plan is None:
             return
         if self.chat.busy:
             ui.notify("Espere o agente terminar para aprovar o plano.")
+            return
+        if self._refresh_plan():
+            ui.notify("O plano mudou. Confira os cartões e aprove de novo.")
             return
         comments: list[str] = []
         for state in self.plan["estados"]:
@@ -159,14 +166,16 @@ class PlanCards:
 
         def write(event: ValueChangeEventArguments) -> None:
             # An empty field would make the plan invalid, so the file keeps the last text until it is filled.
-            if (event.value or "").strip():
-                state[key] = event.value
+            if (event.value or "").strip() and not self._refresh_plan():
+                state[key] = _text(event.value)
                 self._write()
 
         field = kind(label, value=state[key], on_change=write, validation={FILL_IN: _filled})
         return field.classes("w-full").mark(f"{key}-{state['id']}")
 
     def _add_state(self) -> None:
+        if self._refresh_plan():
+            return
         states = self.plan["estados"]
         taken = {state["id"] for state in states}
         number = len(states)
@@ -191,13 +200,15 @@ class PlanCards:
 
     def _add_comment(self, state: Any, text: str | None) -> None:
         text = (text or "").strip()
-        if not text:
+        if not text or self._refresh_plan():
             return
-        _set_comments(state, [*_comments(state), text])
+        _set_comments(state, [*_comments(state), _text(text)])
         self._write()
         self._build()
 
     def _remove_comment(self, state: Any, index: int) -> None:
+        if self._refresh_plan():
+            return
         comments = _comments(state)
         del comments[index]
         _set_comments(state, comments)
@@ -243,6 +254,19 @@ def _without_comments(text: str) -> str:
     for state in plan["estados"]:
         _set_comments(state, [])
     return _dump(plan)
+
+
+def _text(value: str) -> str:
+    """The value, quoted when PyYAML, which validates the plan, would read it as something else.
+
+    The round-trip YAML writes YAML 1.2, where `1:30` and `yes` are plain text; PyYAML reads
+    YAML 1.1, where they are a number and a boolean.
+    """
+    try:
+        plain = yaml.safe_load(value) == value
+    except yaml.YAMLError:
+        plain = False
+    return value if plain else SingleQuotedScalarString(value)
 
 
 def _comments(state: Any) -> list[str]:
