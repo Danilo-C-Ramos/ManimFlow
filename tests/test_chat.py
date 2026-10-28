@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from nicegui import ui
 from nicegui.testing.user_simulation import user_simulation
 
-from manimflow.agent import AgentError, AssistantText, CommandFinished, CommandStarted
+from manimflow.agent import AgentError, AssistantText, CommandFinished, CommandStarted, ImageViewed
 from manimflow.app import lesson_page
 from manimflow.fake_agent import EditFile, ScriptedAgent
 
@@ -56,6 +56,7 @@ async def test_sending_a_message_streams_the_agent_events_in_order(tmp_path):
         assert conversation(user) == [
             "muda a cor da luz",
             "Vou trocar a cor da luz.",
+            "Renderizando a prévia",
             "manimflow preview . S2",
             "Concluído: manimflow preview . S2",
             "Arquivo criado: cenas.py",
@@ -79,9 +80,57 @@ async def test_a_failed_command_shows_its_exit_code(tmp_path):
         await user.should_see("Falhou (código 2): manimflow render . S2")
         assert conversation(user) == [
             "renderiza",
+            "Renderizando a versão final",
             "manimflow render . S2",
             "Arquivo alterado: cenas.py",
             "Falhou (código 2): manimflow render . S2",
+        ]
+
+
+def ran(command, exit_code=0):
+    return [CommandStarted(command, command), CommandFinished(command, command, exit_code)]
+
+
+async def test_each_self_check_step_shows_in_the_chat(tmp_path):
+    scenario = [
+        [
+            EditFile("cenas.py", "x = 1\n"),
+            *ran("manimflow plan validate ."),
+            *ran("python -m pytest -q -p no:cacheprovider test_fisica.py"),
+            *ran("manimflow preview . S1_EixosHeroi --json"),
+            *ran("manimflow frames . S0-S1"),
+            *ran("manimflow check-continuity . S0-S1", exit_code=1),
+            ImageViewed("saida/previa/quadros/S0-S1_fim.png"),
+            *ran("ls saida"),
+            AssistantText("A transição S0-S1 termina fora do lugar. Vou corrigir."),
+        ]
+    ]
+    async with open_lesson(tmp_path, scenario) as user:
+        send(user, "fecha os eixos do herói")
+
+        await user.should_see("A transição S0-S1 termina fora do lugar. Vou corrigir.")
+        assert conversation(user) == [
+            "fecha os eixos do herói",
+            "Arquivo criado: cenas.py",
+            "Validando o plano",
+            "manimflow plan validate .",
+            "Concluído: manimflow plan validate .",
+            "Rodando os testes de física",
+            "python -m pytest -q -p no:cacheprovider test_fisica.py",
+            "Concluído: python -m pytest -q -p no:cacheprovider test_fisica.py",
+            "Renderizando a prévia",
+            "manimflow preview . S1_EixosHeroi --json",
+            "Concluído: manimflow preview . S1_EixosHeroi --json",
+            "Extraindo os quadros",
+            "manimflow frames . S0-S1",
+            "Concluído: manimflow frames . S0-S1",
+            "Conferindo a continuidade",
+            "manimflow check-continuity . S0-S1",
+            "Falhou (código 1): manimflow check-continuity . S0-S1",
+            "Olhou a imagem S0-S1_fim.png",
+            "ls saida",
+            "Concluído: ls saida",
+            "A transição S0-S1 termina fora do lugar. Vou corrigir.",
         ]
 
 
