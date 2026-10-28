@@ -21,6 +21,7 @@ from manimflow.agent import (
     Session,
 )
 from manimflow.preview import PreviewPanel
+from manimflow.versioning import OUTSIDE_EDITS, History
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,7 @@ def lesson_page(agent: Agent, lesson: Path) -> Callable[[], Awaitable[None]]:
 
     async def page() -> None:
         ui.page_title(f"{lesson.name} · ManimFlow")
+        history = History.open(lesson)
         with ui.header().classes("items-center"):
             ui.label(lesson.name).classes("text-lg")
         body = ui.column().classes("w-full")
@@ -78,7 +80,7 @@ def lesson_page(agent: Agent, lesson: Path) -> Callable[[], Awaitable[None]]:
             body.clear()
             with body, ui.row().classes("w-full no-wrap items-start gap-6"):
                 with ui.column().classes("w-1/2"):
-                    Chat(session)
+                    Chat(session, history)
                 with ui.scroll_area().classes("w-1/2 h-[calc(100vh-6rem)]"):
                     PreviewPanel(lesson)
 
@@ -149,8 +151,9 @@ class SignIn:
 
 
 class Chat:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, history: History) -> None:
         self.session = session
+        self.history = history
         with ui.column().classes("w-full max-w-3xl mx-auto h-[calc(100vh-6rem)]"):
             with ui.scroll_area().classes("grow w-full") as self.scroll:
                 self.conversation = ui.column().classes("w-full gap-2").mark("conversation")
@@ -176,6 +179,8 @@ class Chat:
         self._set_busy(True)
         with self.conversation, ui.chat_message(name="Você", sent=True):
             ui.label(text)
+        # So the agent's commit holds only what the agent changed.
+        self._save_version(lambda: self.history.commit_manual_edit(OUTSIDE_EDITS))
         try:
             async for event in self.session.send(text):
                 with self.conversation:
@@ -187,7 +192,19 @@ class Chat:
             with self.conversation:
                 _error_row("O agente parou por um erro inesperado.")
         finally:
+            # Even a failed turn may have changed files, and they must not be lost.
+            self._save_version(lambda: self.history.commit_agent_turn(text))
             self._set_busy(False)
+
+    def _save_version(self, commit: Callable[[], object]) -> None:
+        """Runs `commit`, telling the teacher when the version couldn't be saved; the
+        chat goes on either way."""
+        try:
+            commit()
+        except Exception:
+            logger.exception("Commit failed")
+            with self.conversation:
+                _error_row("Não foi possível salvar uma versão desta mudança.")
 
     def _set_busy(self, busy: bool) -> None:
         self.input.set_enabled(not busy)
