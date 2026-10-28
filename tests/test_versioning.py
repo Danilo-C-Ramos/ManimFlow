@@ -38,7 +38,8 @@ def history_of(lesson):
 
 
 def files_in(commit):
-    """The path and content of every file the commit holds."""
+    """The path and content of every file the commit holds, with LF line endings
+    (files written on Windows have CRLF)."""
     found = {}
 
     def walk(tree, prefix):
@@ -46,7 +47,7 @@ def files_in(commit):
             if entry.type_str == "tree":
                 walk(entry, f"{prefix}{entry.name}/")
             else:
-                found[f"{prefix}{entry.name}"] = entry.data.decode("utf-8")
+                found[f"{prefix}{entry.name}"] = entry.data.decode("utf-8").replace("\r\n", "\n")
 
     walk(commit.tree, "")
     return found
@@ -197,15 +198,16 @@ async def test_a_failed_commit_is_reported_and_the_chat_recovers(tmp_path):
 
 
 def test_manual_changes_hold_the_teachers_edits_since_the_agents_last_turn(tmp_path):
-    (tmp_path / "fisica.py").write_text("g = 9.8\nm = 2\n", encoding="utf-8")
-    (tmp_path / "cenas.py").write_text("COR = AZUL\n", encoding="utf-8")
+    # LF on every platform, so the blob ids in the expected diff hold on Windows too.
+    (tmp_path / "fisica.py").write_text("g = 9.8\nm = 2\n", encoding="utf-8", newline="\n")
+    (tmp_path / "cenas.py").write_text("COR = AZUL\n", encoding="utf-8", newline="\n")
     history = History.open(tmp_path)
-    (tmp_path / "cenas.py").write_text("COR = VERDE\n", encoding="utf-8")
+    (tmp_path / "cenas.py").write_text("COR = VERDE\n", encoding="utf-8", newline="\n")
     history.commit_agent_turn("luz verde")
 
-    (tmp_path / "fisica.py").write_text("g = 9.81\nm = 2\n", encoding="utf-8")
+    (tmp_path / "fisica.py").write_text("g = 9.81\nm = 2\n", encoding="utf-8", newline="\n")
     history.commit_manual_edit("Edição manual em fisica.py")
-    (tmp_path / "notas.md").write_text("Conferir g.\n", encoding="utf-8")
+    (tmp_path / "notas.md").write_text("Conferir g.\n", encoding="utf-8", newline="\n")
 
     assert history.manual_changes() == (
         "diff --git a/fisica.py b/fisica.py\n"
