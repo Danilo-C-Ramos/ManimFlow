@@ -171,3 +171,24 @@ async def test_the_panel_refreshes_after_an_agent_turn_and_after_a_manual_edit(l
         await eventually(
             lambda: entries(user) == [("Velocidade", "fórmula v", "= 0.8 c"), ("Fator", r"fórmula \gamma", "= 1.667")]
         )
+
+
+async def test_physics_written_with_dataclasses_works(lesson):
+    physics(
+        lesson,
+        "from __future__ import annotations\n"
+        "from dataclasses import dataclass\n\n"
+        "@dataclass\n"
+        "class Equacao:\n"
+        "    nome: str\n"
+        "    latex: str\n"
+        "    valor: float\n"
+        "    unidade: str\n\n"
+        "    def __iter__(self):\n"
+        "        return iter((self.nome, self.latex, self.valor, self.unidade))\n\n"
+        "def equacoes():\n"
+        "    return [Equacao('Velocidade', 'v', 0.6, 'c')]\n",
+    )
+    async with open_lesson(lesson) as user:
+        await eventually(lambda: len(panel(user)) > 2)
+        assert entries(user) == [("Velocidade", "fórmula v", "= 0.6 c")]

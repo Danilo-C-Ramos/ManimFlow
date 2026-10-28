@@ -45,6 +45,8 @@ def _entries(folder: Path) -> list[list]:
     spec = importlib.util.spec_from_file_location(path.stem, path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
+    # As an import would: dataclasses, for one, look their module up here.
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
 
     equacoes = getattr(module, "equacoes", None)
