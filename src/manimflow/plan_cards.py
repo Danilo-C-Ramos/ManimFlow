@@ -35,7 +35,9 @@ class Chat(Protocol):
     @property
     def busy(self) -> bool: ...
 
-    async def submit(self, text: str) -> None: ...
+    async def submit(self, text: str) -> bool:
+        """False when the agent's turn failed."""
+        ...
 
 
 class PlanCards:
@@ -45,6 +47,8 @@ class PlanCards:
         # The plan's text as the cards show it, and as the agent last saw it, to tell it what the teacher changed.
         self.text: str | None = None
         self.approved = ""
+        # Comments of an approval whose turn failed, sent again with the next one.
+        self.unsent: list[str] = []
         self.plan: Any = None
         self._stamp: tuple[int, ...] = ()
         self.served_at = serve_outputs(lesson)
@@ -114,14 +118,23 @@ class PlanCards:
         if self._refresh_plan():
             ui.notify("O plano mudou. Confira os cartões e aprove de novo.")
             return
-        comments: list[str] = []
+        comments = list(self.unsent)
         for state in self.plan["estados"]:
             comments += [f"- {state['id']} ({state['titulo']}): {comment}" for comment in _comments(state)]
             _set_comments(state, [])
         self._write()
-        before, self.approved = _without_comments(self.approved), _dump(self.plan)
+        previous = self.approved
+        before, sent = _without_comments(previous), _dump(self.plan)
+        self.approved = sent
         self._build()
-        await self.chat.submit(_approval(before, self.approved, comments))
+        if await self.chat.submit(_approval(before, sent, comments)):
+            self.unsent = []
+            return
+        # The agent never handled them, so the next approval carries them again. The comments
+        # stay off the file, and a plan the agent rewrote meanwhile is the new baseline.
+        self.unsent = comments
+        if self.approved == sent:
+            self.approved = previous
 
     def _build(self) -> None:
         self.content.clear()

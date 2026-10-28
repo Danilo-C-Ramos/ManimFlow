@@ -182,13 +182,18 @@ class Chat:
         self.input.value = ""
         await self.submit(text)
 
-    async def submit(self, text: str) -> None:
-        """Sends `text` as the teacher's message and shows the agent's turn as it streams."""
+    async def submit(self, text: str) -> bool:
+        """Sends `text` as the teacher's message and shows the agent's turn as it streams.
+
+        False when the turn failed.
+        """
         self._set_busy(True)
         with self.conversation, ui.chat_message(name="Você", sent=True):
             ui.label(text).classes("whitespace-pre-wrap")
+        ok = True
         try:
             async for event in self.session.send(text):
+                ok = ok and not isinstance(event, AgentError)
                 with self.conversation:
                     self._show(event)
                 self.scroll.scroll_to(percent=1)
@@ -197,8 +202,10 @@ class Chat:
             logger.exception("Agent turn failed")
             with self.conversation:
                 _error_row("O agente parou por um erro inesperado.")
+            ok = False
         finally:
             self._set_busy(False)
+        return ok
 
     def _set_busy(self, busy: bool) -> None:
         self.input.set_enabled(not busy)

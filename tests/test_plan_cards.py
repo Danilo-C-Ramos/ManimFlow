@@ -5,7 +5,7 @@ import yaml
 from nicegui import ui
 from nicegui.testing.user_simulation import user_simulation
 
-from manimflow.agent import AssistantText
+from manimflow.agent import AgentError, AssistantText
 from manimflow.app import lesson_page
 from manimflow.fake_agent import EditFile, ScriptedAgent
 from manimflow.preview import REFRESH_INTERVAL
@@ -377,3 +377,24 @@ async def test_an_edit_on_a_plan_the_agent_just_rewrote_is_not_written(lesson):
 
         assert cards(user)[1:3] == ["A", "Título: Antes"]
     assert (lesson / "plano.yaml").read_text(encoding="utf-8") == TWO_STATES
+
+
+async def test_approving_again_after_the_agent_failed_resends_the_changes_and_comments(lesson):
+    agent = ScriptedAgent([[AgentError("Sem conexão.")], [RuntimeError("engine crashed")], [AssistantText("Sigo.")]])
+    async with open_lesson(lesson, agent) as user:
+        edit(user, "titulo-S1", "Quadrado na direita")
+        user.find("Aprovar plano").click()
+        await user.should_see("Erro do agente: Sem conexão.")
+
+        user.find("Aprovar plano").click()
+        await user.should_see("O agente parou por um erro inesperado.")
+
+        user.find(marker="comentario-S0").type("Mais azul.")
+        user.find(marker="comentar-S0").click()
+        user.find("Aprovar plano").click()
+        await user.should_see("Sigo.")
+
+    first, second, third = agent.messages
+    assert second == first
+    assert first.endswith("Comentários:\n- S1 (Quadrado na direita): Talvez deslocar mais.")
+    assert third == first + "\n- S0 (Quadrado): Mais azul."
