@@ -518,20 +518,19 @@ wheels = [
 
 [[package]]
 name = "manimflow"
-version = "0.0.1"
 source = { editable = "." }
 dependencies = [
     { name = "manim" },
     { name = "nicegui" },
     { name = "openai-codex" },
     { name = "pygit2" },
+    { name = "pytest" },
     { name = "pyyaml" },
 ]
 
 [package.dev-dependencies]
 dev = [
     { name = "mypy" },
-    { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "types-pyyaml" },
 ]
@@ -542,13 +541,13 @@ requires-dist = [
     { name = "nicegui", specifier = ">=3,<4" },
     { name = "openai-codex", specifier = ">=0.162,<0.163" },
     { name = "pygit2", specifier = ">=1.18,<2" },
+    { name = "pytest", specifier = ">=8,<10" },
     { name = "pyyaml", specifier = ">=6,<7" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "mypy", specifier = ">=1.13" },
-    { name = "pytest", specifier = ">=8" },
     { name = "pytest-asyncio", specifier = ">=1" },
     { name = "types-pyyaml", specifier = ">=6" },
 ]

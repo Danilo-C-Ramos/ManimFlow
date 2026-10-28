@@ -1,6 +1,7 @@
 """The NiceGUI app: the lesson screen with its chat. Every UI string is in Portuguese."""
 
 import logging
+import re
 import socket
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -15,15 +16,27 @@ from manimflow.agent import (
     CommandStarted,
     Event,
     FileChanged,
+    ImageViewed,
     LoginFailed,
     Session,
 )
 from manimflow.preview import PreviewPanel
+from manimflow.sessions import SessionHistory
 from manimflow.versioning import OUTSIDE_EDITS, History
 
 logger = logging.getLogger(__name__)
 
 _FILE_CHANGES = {"added": "Arquivo criado", "modified": "Arquivo alterado", "deleted": "Arquivo apagado"}
+
+# The steps of the agent's self-check, named for the teacher above the raw command.
+_STEPS = [
+    (re.compile(r"\bmanimflow\s+plan\s+validate\b"), "Validando o plano"),
+    (re.compile(r"\bmanimflow\s+preview\b"), "Renderizando a prévia"),
+    (re.compile(r"\bmanimflow\s+render\b"), "Renderizando a versão final"),
+    (re.compile(r"\bmanimflow\s+frames\b"), "Extraindo os quadros"),
+    (re.compile(r"\bmanimflow\s+check-continuity\b"), "Conferindo a continuidade"),
+    (re.compile(r"\bpytest\b.*\btest_fisica\.py\b"), "Rodando os testes de física"),
+]
 
 
 def serve(agent: Agent, root: Callable[..., Awaitable[None]]) -> None:
@@ -53,13 +66,15 @@ def lesson_page(agent: Agent, lesson: Path) -> Callable[[], Awaitable[None]]:
     async def page() -> None:
         ui.page_title(f"{lesson.name} · ManimFlow")
         history = History.open(lesson)
-        with ui.header().classes("items-center"):
+        with ui.header().classes("items-center justify-between") as header:
             ui.button("Minhas aulas", icon="arrow_back", on_click=lambda: ui.navigate.to("/")).props("flat color=white")
             ui.label(lesson.name).classes("text-lg")
         body = ui.column().classes("w-full")
 
         async def open_chat() -> None:
             session = await agent.start_session(lesson)
+            with header:
+                SessionHistory(agent, lesson, current=session)
             body.clear()
             with body, ui.row().classes("w-full no-wrap items-start gap-6"):
                 with ui.column().classes("w-1/2"):
@@ -201,6 +216,8 @@ class Chat:
                     ui.markdown(text)
             case CommandStarted(_, command):
                 with _event_row("terminal", "grey-7"):
+                    if step := _step(command):
+                        ui.label(step)
                     ui.label(command).classes("font-mono")
             case CommandFinished(_, command):
                 if event.ok:
@@ -212,8 +229,15 @@ class Chat:
             case FileChanged(path, change):
                 with _event_row("edit_document", "primary"):
                     ui.label(f"{_FILE_CHANGES[change]}: {path}")
+            case ImageViewed(path):
+                with _event_row("visibility", "primary"):
+                    ui.label(f"Olhou a imagem {Path(path).name}").tooltip(path)
             case AgentError(message):
                 _error_row(f"Erro do agente: {message}")
+
+
+def _step(command: str) -> str | None:
+    return next((step for pattern, step in _STEPS if pattern.search(command)), None)
 
 
 def _event_row(icon: str, color: str) -> ui.row:

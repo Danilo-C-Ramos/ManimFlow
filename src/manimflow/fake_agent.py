@@ -7,8 +7,9 @@ engine would.
 """
 
 import asyncio
-from collections.abc import AsyncIterator, Iterator, Sequence
+from collections.abc import AsyncIterator, Callable, Iterator, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from manimflow.agent import (
@@ -19,8 +20,11 @@ from manimflow.agent import (
     CommandStarted,
     Event,
     FileChanged,
+    ImageViewed,
     LoginFailed,
+    Message,
     ModelSettings,
+    PastSession,
 )
 
 
@@ -58,6 +62,7 @@ class ScriptedAgent:
         delay: float = 0.0,
         logged_in: bool = True,
         login_failure: str | None = None,
+        clock: Callable[[], datetime] = datetime.now,
     ) -> None:
         self.scenario = scenario
         # Seconds between steps, so the demo streams at a visible pace.
@@ -65,9 +70,26 @@ class ScriptedAgent:
         self._account = ACCOUNT if logged_in else Account(logged_in=False)
         # When set, every login attempt fails with this message.
         self._login_failure = login_failure
+        # When each session started; the fake keeps its sessions in memory only.
+        self._clock = clock
+        self._sessions: list[ScriptedSession] = []
 
     async def start_session(self, lesson: Path) -> "ScriptedSession":
-        return ScriptedSession(lesson, iter(self.scenario), self.delay)
+        """A new session, which plays the scenario from its first turn."""
+        session = ScriptedSession(str(len(self._sessions) + 1), lesson, iter(self.scenario), self.delay, self._clock())
+        self._sessions.append(session)
+        return session
+
+    async def past_sessions(self, lesson: Path) -> list[PastSession]:
+        return [
+            PastSession(session.id, session.started_at, session.messages[0].text)
+            for session in reversed(self._sessions)
+            if session.lesson.resolve() == lesson.resolve() and session.messages
+        ]
+
+    async def session_messages(self, session_id: str) -> list[Message]:
+        (session,) = [session for session in self._sessions if session.id == session_id]
+        return list(session.messages)
 
     async def account(self) -> Account:
         return self._account
@@ -89,12 +111,18 @@ class ScriptedAgent:
 
 
 class ScriptedSession:
-    def __init__(self, lesson: Path, turns: Iterator[list[Step]], delay: float) -> None:
+    def __init__(
+        self, id: str, lesson: Path, turns: Iterator[list[Step]], delay: float, started_at: datetime
+    ) -> None:
+        self.id = id
         self.lesson = lesson
+        self.started_at = started_at
+        self.messages: list[Message] = []
         self._turns = turns
         self._delay = delay
 
     async def send(self, text: str, attachments: Sequence[Path] = ()) -> AsyncIterator[Event]:
+        self.messages.append(Message("teacher", text))
         turn = next(self._turns, None)
         if turn is None:
             yield AgentError("O roteiro do agente de demonstração acabou.")
@@ -108,6 +136,8 @@ class ScriptedSession:
             elif isinstance(step, Produce):
                 self._target(step.path).write_bytes(step.content)
             else:
+                if isinstance(step, AssistantText):
+                    self.messages.append(Message("agent", step.text))
                 yield step
 
     def _edit(self, edit: EditFile) -> FileChanged:
@@ -132,6 +162,7 @@ DEMO: Scenario = [
         EditFile("rascunho.md", "# Rascunho\n\nTrocar a cor da luz para amarelo.\n"),
         CommandStarted("1", "manimflow preview . S2_Reflexao"),
         CommandFinished("1", "manimflow preview . S2_Reflexao", 0),
+        ImageViewed("saida/previa/png/S2_Reflexao.png"),
         AssistantText("Renderizei a prévia de S2 e conferi o último quadro."),
     ],
     [
