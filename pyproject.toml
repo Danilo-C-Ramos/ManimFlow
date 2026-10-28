@@ -44,5 +44,5 @@ markers = ["smoke: drives the real Codex agent; needs a signed-in account and sp
 [tool.mypy]
 files = ["src", "tests"]
 # Lesson code belongs to the teacher and is checked by rendering it, not by mypy.
-exclude = ["src/manimflow/exemplos/"]
+exclude = ["src/manimflow/exemplos/", "src/manimflow/modelo/"]
 ignore_missing_imports = true
