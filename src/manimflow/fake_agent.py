@@ -51,6 +51,14 @@ class Produce:
     content: bytes
 
 
+@dataclass(frozen=True)
+class Received:
+    """A message the teacher sent, with each attachment's name and content as sent."""
+
+    text: str
+    attachments: dict[str, str]
+
+
 Step = Event | EditFile | Produce | Exception
 Scenario = list[list[Step]]
 
@@ -86,11 +94,19 @@ class ScriptedAgent:
         # When each session started; the fake keeps its sessions in memory only.
         self._clock = clock
         self._sessions: list[ScriptedSession] = []
+        # Every message sent to any of its sessions, with its attachments, in order.
+        self.received: list[Received] = []
 
     async def start_session(self, lesson: Path) -> "ScriptedSession":
         """A new session, which plays the scenario from its first turn."""
         session = ScriptedSession(
-            str(len(self._sessions) + 1), lesson, iter(self.scenario), self.delay, self._clock(), self._start_turn
+            str(len(self._sessions) + 1),
+            lesson,
+            iter(self.scenario),
+            self.delay,
+            self._clock(),
+            self._start_turn,
+            self.received,
         )
         self._sessions.append(session)
         return session
@@ -146,6 +162,7 @@ class ScriptedSession:
         delay: float,
         started_at: datetime,
         on_turn: Callable[[], None],
+        received: list[Received],
     ) -> None:
         self.id = id
         self.lesson = lesson
@@ -154,10 +171,13 @@ class ScriptedSession:
         self._turns = turns
         self._delay = delay
         self._on_turn = on_turn
+        self._received = received
 
     async def send(self, text: str, attachments: Sequence[Path] = ()) -> AsyncIterator[Event]:
         self._on_turn()
         self.messages.append(Message("teacher", text))
+        # Read now, as the Codex adapter does, since the files may change after the message.
+        self._received.append(Received(text, {path.name: path.read_text(encoding="utf-8") for path in attachments}))
         turn = next(self._turns, None)
         if turn is None:
             yield AgentError("O roteiro do agente de demonstração acabou.")

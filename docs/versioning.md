@@ -9,7 +9,7 @@ Each lesson folder is a local git repository (`.git/` inside the lesson), manage
 | A lesson without history is opened | `Primeira versão da aula` |
 | The teacher's files changed outside ManimFlow before a message to the agent | `Edições feitas fora do ManimFlow` |
 | An agent turn ends, even a failed one, and it changed files | `Pedido: <the teacher's message>` |
-| The teacher edits code in the app and presses "Renderizar" (ticket #12) | `Edição manual em fisica.py` |
+| The teacher edits code in the app and presses "Renderizar" | `Edição manual em fisica.py` |
 
 A turn or an edit that changes no file makes no commit. Each commit is a full snapshot of the lesson, so deleted files leave it too. When a commit fails (say, a `.git/index.lock` left behind by a crash), the chat says so in Portuguese and goes on, and the next commit picks the changes up.
 
@@ -26,7 +26,7 @@ The list is written to `.git/info/exclude` every time the lesson opens, rather t
 
 ## The diff of manual edits
 
-`History.manual_changes()` returns the teacher's changes since the agent's last turn, committed or not, as a unified diff with paths relative to the lesson (`a/fisica.py`, `b/fisica.py`). The agent's own changes are never in it. It goes to the agent with the teacher's next message, so the agent builds on the fix instead of overwriting it.
+`History.manual_changes()` returns the teacher's changes since the agent's last turn, committed or not, as a unified diff with paths relative to the lesson (`a/fisica.py`, `b/fisica.py`). The agent's own changes are never in it. It goes to the agent with the teacher's next message, as the attachment `.manimflow/edicoes-manuais.diff`, so the agent builds on the fix instead of overwriting it. See [the code tab](code-tab.md).
 
 The agent's last turn is the ref `refs/manimflow/last-agent-turn`. Every turn moves it, including a turn that changed nothing, since that turn already received the diff with its message.
 

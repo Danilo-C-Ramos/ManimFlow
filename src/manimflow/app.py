@@ -20,13 +20,18 @@ from manimflow.agent import (
     LoginFailed,
     Session,
 )
+from manimflow.code_tab import CodeTab
 from manimflow.equations import EquationsPanel
 from manimflow.preview import PreviewPanel
+from manimflow.render import cache_dir
 from manimflow.sessions import SessionHistory
 from manimflow.settings import SettingsDialog, model_switch
 from manimflow.versioning import OUTSIDE_EDITS, History
 
 logger = logging.getLogger(__name__)
+
+# The teacher's own edits since the agent's last turn, attached to the next message.
+MANUAL_EDITS = "edicoes-manuais.diff"
 
 _FILE_CHANGES = {"added": "Arquivo criado", "modified": "Arquivo alterado", "deleted": "Arquivo apagado"}
 
@@ -83,16 +88,19 @@ def lesson_page(agent: Agent, lesson: Path) -> Callable[[], Awaitable[None]]:
             body.clear()
             with body, ui.row().classes("w-full no-wrap items-start gap-6"):
                 with ui.column().classes("w-1/2"):
-                    Chat(session, history)
+                    chat = Chat(session, history)
                 with ui.column().classes("w-1/2 gap-0"):
-                    with ui.tabs() as tabs:
-                        preview_tab = ui.tab("Prévia")
-                        equations_tab = ui.tab("Equações")
-                    with ui.tab_panels(tabs, value=preview_tab).classes("w-full"):
-                        with ui.tab_panel(preview_tab).classes("p-0"):
+                    with ui.tabs().props("dense align=left") as tabs:
+                        ui.tab("Prévia")
+                        ui.tab("Código")
+                        ui.tab("Equações")
+                    with ui.tab_panels(tabs, value="Prévia").classes("w-full"):
+                        with ui.tab_panel("Prévia").classes("p-0"):
                             with ui.scroll_area().classes("h-[calc(100vh-9rem)]"):
                                 PreviewPanel(lesson)
-                        with ui.tab_panel(equations_tab).classes("p-0"):
+                        with ui.tab_panel("Código").classes("p-0"):
+                            chat.on_busy = CodeTab(lesson, history).set_agent_working
+                        with ui.tab_panel("Equações").classes("p-0"):
                             with ui.scroll_area().classes("h-[calc(100vh-9rem)]"):
                                 EquationsPanel(lesson)
 
@@ -171,6 +179,8 @@ class Chat:
     def __init__(self, session: Session, history: History) -> None:
         self.session = session
         self.history = history
+        # Told when a turn starts and ends, for whatever must wait for the agent.
+        self.on_busy: Callable[[bool], None] = lambda busy: None
         with ui.column().classes("w-full max-w-3xl mx-auto h-[calc(100vh-6rem)]"):
             with ui.scroll_area().classes("grow w-full") as self.scroll:
                 self.conversation = ui.column().classes("w-full gap-2").mark("conversation")
@@ -199,7 +209,7 @@ class Chat:
         # So the agent's commit holds only what the agent changed.
         self._save_version(lambda: self.history.commit_manual_edit(OUTSIDE_EDITS))
         try:
-            async for event in self.session.send(text):
+            async for event in self.session.send(text, self._manual_edits()):
                 with self.conversation:
                     self._show(event)
                 self.scroll.scroll_to(percent=1)
@@ -212,6 +222,23 @@ class Chat:
             # Even a failed turn may have changed files, and they must not be lost.
             self._save_version(lambda: self.history.commit_agent_turn(text))
             self._set_busy(False)
+
+    def _manual_edits(self) -> list[Path]:
+        """The diff of the teacher's edits since the agent's last turn, as an attachment
+        file, so the agent builds on them; none when there are no such edits."""
+        try:
+            diff = self.history.manual_changes()
+            if not diff:
+                return []
+            attachment = cache_dir(self.session.lesson) / MANUAL_EDITS
+            attachment.write_text(diff, encoding="utf-8")
+        except Exception:
+            # The message still goes: the teacher can tell the agent what they changed.
+            logger.exception("Manual changes failed")
+            with self.conversation:
+                _error_row("Não foi possível mandar ao agente as suas edições no código.")
+            return []
+        return [attachment]
 
     def _save_version(self, commit: Callable[[], object]) -> None:
         """Runs `commit`, telling the teacher when the version couldn't be saved; the
@@ -227,6 +254,7 @@ class Chat:
         self.input.set_enabled(not busy)
         self.button.set_enabled(not busy)
         self.working.set_visibility(busy)
+        self.on_busy(busy)
 
     def _show(self, event: Event) -> None:
         match event:
