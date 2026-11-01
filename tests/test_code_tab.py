@@ -25,7 +25,8 @@ async def open_lesson(lesson, scenario=(), delay=0.0):
 def minimal_lesson(tmp_path):
     lesson = tmp_path / "Aula Mínima"
     shutil.copytree(FIXTURES / "aula_minima", lesson)
-    (lesson / "fisica.py").write_text("VELOCIDADE = 1.0\n", encoding="utf-8")
+    # LF on every platform, as the agent writes it.
+    (lesson / "fisica.py").write_text("VELOCIDADE = 1.0\n", encoding="utf-8", newline="\n")
     return lesson
 
 
@@ -66,6 +67,19 @@ async def test_renderizar_saves_the_edit_and_commits_it_as_a_manual_edit(tmp_pat
         newest = history_of(lesson)[0]
         assert newest.message == "Edição manual em fisica.py"
         assert newest.tree["fisica.py"].data == b"VELOCIDADE = 1.0\nACELERACAO = 9.8\n"
+
+
+async def test_renderizar_keeps_the_files_line_endings(tmp_path):
+    lesson = minimal_lesson(tmp_path)
+    # As an editor on Windows would have left it.
+    (lesson / "fisica.py").write_bytes(b"VELOCIDADE = 1.0\r\n")
+    async with open_lesson(lesson) as (user, _):
+        user.find("Código").click()
+        user.find(marker="code").type("ACELERACAO = 9.8\n")
+        user.find("Renderizar").click()
+
+        await user.should_see("Prévia atualizada.", retries=600)
+        assert (lesson / "fisica.py").read_bytes() == b"VELOCIDADE = 1.0\r\nACELERACAO = 9.8\r\n"
 
 
 async def send(user, text, last):

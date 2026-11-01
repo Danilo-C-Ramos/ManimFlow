@@ -4,7 +4,7 @@ The lesson screen's "Código" tab shows `fisica.py` and `cenas.py` in a CodeMirr
 
 ## "Renderizar"
 
-1. Every file with unsaved edits is written, then committed as `Edição manual em fisica.py` (or `em fisica.py e cenas.py`). See [versioning](versioning.md).
+1. Every file with unsaved edits is written, keeping the line endings it already had (LF for a new file), then committed as `Edição manual em fisica.py` (or `em fisica.py e cenas.py`). See [versioning](versioning.md).
 2. Every scene in the plan is previewed, in plan order, through `manimflow preview <lesson> <scene> --json`, the same CLI the agent uses. A change to `fisica.py` can affect any scene, so all of them are rendered. The first scene that fails stops the run, and the tab shows `A cena S2 não renderizou:` followed by the last line of Manim's output, which is the Python error.
 3. The preview panel picks the new renders up on its own.
 

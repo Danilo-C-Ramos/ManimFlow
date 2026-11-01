@@ -142,7 +142,10 @@ class CodeTab:
         edited = [name for name in FILES if self.drafts[name] != self.saved[name]]
         for name in edited:
             try:
-                (self.lesson / name).write_text(self.drafts[name], encoding="utf-8")
+                path = self.lesson / name
+                # The editor's text has LF endings; any other would make every line differ
+                # in the history and in the diff the agent gets.
+                path.write_text(self.drafts[name], encoding="utf-8", newline=_line_ending(path))
             except OSError as error:
                 logger.exception("Saving %s failed", name)
                 self._show(f"Não foi possível salvar {name}:", [str(error)])
@@ -200,6 +203,14 @@ def _preview_scene(lesson: Path, scene: str) -> str | None:
     # The last line of Manim's output is the Python error, such as "NameError: name 'g' is not defined".
     output = report["manim_output"].strip().splitlines()
     return output[-1] if output else "; ".join(report["errors"])
+
+
+def _line_ending(path: Path) -> str:
+    """The line ending the file uses, CRLF or LF; LF for a new file."""
+    try:
+        return "\r\n" if b"\r\n" in path.read_bytes() else "\n"
+    except FileNotFoundError:
+        return "\n"
 
 
 def _read(path: Path) -> str:

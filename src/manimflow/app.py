@@ -226,7 +226,8 @@ class Chat:
             if not diff:
                 return []
             attachment = cache_dir(self.session.lesson) / MANUAL_EDITS
-            attachment.write_text(diff, encoding="utf-8")
+            # As is: the diff holds each file's own line endings.
+            attachment.write_text(diff, encoding="utf-8", newline="")
         except Exception:
             # The message still goes: the teacher can tell the agent what they changed.
             logger.exception("Manual changes failed")
