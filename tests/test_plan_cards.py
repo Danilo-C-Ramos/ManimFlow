@@ -8,6 +8,7 @@ from nicegui.testing.user_simulation import user_simulation
 from manimflow.agent import AgentError, AssistantText
 from manimflow.app import lesson_page
 from manimflow.fake_agent import EditFile, ScriptedAgent
+from manimflow.lessons import Library
 from manimflow.preview import REFRESH_INTERVAL
 
 
@@ -59,6 +60,11 @@ async def eventually(check, seconds=3.0):
             return
         await asyncio.sleep(0.05)
     assert check()
+
+
+def messages(agent):
+    """The text of every message the fake agent received, in order."""
+    return [message.text for message in agent.received]
 
 
 def plan(lesson):
@@ -159,7 +165,7 @@ async def test_approving_sends_one_message_with_the_plan_changes_and_every_comme
         user.find("Aprovar plano").click()
 
         await user.should_see("Vou seguir o plano.")
-        assert agent.messages == [
+        assert messages(agent) == [
             "Aprovei o plano.\n"
             "\n"
             "Mudei o plano.yaml assim:\n"
@@ -199,7 +205,7 @@ async def test_approving_an_untouched_plan_says_so(lesson):
         user.find("Aprovar plano").click()
 
         await user.should_see("Vou seguir o plano.")
-    assert agent.messages == ["Aprovei o plano como está, sem mudanças nem comentários."]
+    assert messages(agent) == ["Aprovei o plano como está, sem mudanças nem comentários."]
 
 
 async def test_approving_keeps_the_rest_of_the_plan_file_as_it_was(example):
@@ -226,7 +232,7 @@ async def test_approving_while_the_agent_works_sends_nothing_and_keeps_the_comme
 
         await user.should_see("Espere o agente terminar para aprovar o plano.")
         await user.should_see("Pronto.")
-        assert agent.messages == ["oi"]
+        assert messages(agent) == ["oi"]
         assert "Talvez deslocar mais." in cards(user)
     assert plan(lesson)["estados"][1]["comentarios"] == ["Talvez deslocar mais."]
 
@@ -271,7 +277,7 @@ async def test_an_approval_after_the_agent_rewrote_the_plan_only_reports_the_tea
         user.find("Aprovar plano").click()
 
         await user.should_see("Sigo.")
-    assert agent.messages[1] == (
+    assert messages(agent)[1] == (
         "Aprovei o plano.\n"
         "\n"
         "Mudei o plano.yaml assim:\n"
@@ -364,7 +370,7 @@ async def test_approving_a_plan_the_agent_just_rewrote_does_not_overwrite_it(les
         user.find("Aprovar plano").click()
 
         await user.should_see("O plano mudou. Confira os cartões e aprove de novo.")
-        assert agent.messages == []
+        assert messages(agent) == []
         assert cards(user)[1:3] == ["A", "Título: Antes"]
     assert (lesson / "plano.yaml").read_text(encoding="utf-8") == TWO_STATES
 
@@ -394,7 +400,36 @@ async def test_approving_again_after_the_agent_failed_resends_the_changes_and_co
         user.find("Aprovar plano").click()
         await user.should_see("Sigo.")
 
-    first, second, third = agent.messages
+    first, second, third = messages(agent)
     assert second == first
     assert first.endswith("Comentários:\n- S1 (Quadrado na direita): Talvez deslocar mais.")
     assert third == first + "\n- S0 (Quadrado): Mais azul."
+
+
+async def test_a_new_lesson_from_the_scaffold_shows_its_placeholder_state_and_stays_valid(manimflow, tmp_path):
+    library = Library(tmp_path / "dados")
+    library.set_folder(tmp_path / "Aulas Manim")
+    lesson = library.create("Aula 1")
+    async with open_lesson(lesson) as user:
+        assert cards(user)[1:4] == [
+            "S0",
+            "Título: Primeiro estado",
+            "O que aparece: Ainda a definir. Conte ao agente o que a aula deve mostrar.",
+        ]
+        user.find("+ estado").click()
+        user.find(marker="comentario-S1").type("Começar pelos eixos.")
+        user.find(marker="comentar-S1").click()
+
+    assert [state["cena"] for state in plan(lesson)["estados"]] == ["S0_Inicio", "S0_Inicio"]
+    assert manimflow("plan", "validate", str(lesson)).returncode == 0
+
+
+async def test_an_edit_keeps_the_plan_file_line_endings(lesson):
+    path = lesson / "plano.yaml"
+    for ending in ("\r\n", "\n"):
+        original = path.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", ending.encode())
+        path.write_bytes(original)
+        async with open_lesson(lesson) as user:
+            edit(user, "titulo-S0", "Quadrado azul")
+
+        assert path.read_bytes() == original.replace(b"titulo: Quadrado" + ending.encode(), b"titulo: Quadrado azul" + ending.encode())

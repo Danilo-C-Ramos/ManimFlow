@@ -230,7 +230,17 @@ class PlanCards:
 
     def _write(self) -> None:
         self.text = _dump(self.plan)
-        (self.lesson / PLAN_FILE).write_text(self.text, encoding="utf-8")
+        path = self.lesson / PLAN_FILE
+        # The file's own line endings, so its history shows only what changed.
+        path.write_text(self.text, encoding="utf-8", newline=_line_ending(path))
+
+
+def _line_ending(path: Path) -> str:
+    """The line ending the file uses, CRLF or LF; LF for a new file."""
+    try:
+        return "\r\n" if b"\r\n" in path.read_bytes() else "\n"
+    except FileNotFoundError:
+        return "\n"
 
 
 def _modified(path: Path) -> int:
