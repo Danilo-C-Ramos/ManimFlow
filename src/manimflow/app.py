@@ -21,6 +21,7 @@ from manimflow.agent import (
     Session,
 )
 from manimflow.code_tab import CodeTab
+from manimflow.equations import EquationsPanel
 from manimflow.preview import PreviewPanel
 from manimflow.render import cache_dir
 from manimflow.sessions import SessionHistory
@@ -92,12 +93,16 @@ def lesson_page(agent: Agent, lesson: Path) -> Callable[[], Awaitable[None]]:
                     with ui.tabs().props("dense align=left") as tabs:
                         ui.tab("Prévia")
                         ui.tab("Código")
+                        ui.tab("Equações")
                     with ui.tab_panels(tabs, value="Prévia").classes("w-full"):
                         with ui.tab_panel("Prévia").classes("p-0"):
                             with ui.scroll_area().classes("h-[calc(100vh-9rem)]"):
                                 PreviewPanel(lesson)
                         with ui.tab_panel("Código").classes("p-0"):
                             chat.on_busy = CodeTab(lesson, history).set_agent_working
+                        with ui.tab_panel("Equações").classes("p-0"):
+                            with ui.scroll_area().classes("h-[calc(100vh-9rem)]"):
+                                EquationsPanel(lesson)
 
         def sign_in() -> None:
             controls.clear()
