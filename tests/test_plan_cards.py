@@ -11,6 +11,10 @@ from manimflow.fake_agent import EditFile, ScriptedAgent
 from manimflow.lessons import Library
 from manimflow.preview import REFRESH_INTERVAL
 
+# Tries of should_see, 0.1 s apart, for what follows an agent turn: each turn
+# commits a version, which takes seconds on Windows.
+TURN = 100
+
 
 @asynccontextmanager
 async def open_lesson(lesson, agent=None):
@@ -53,7 +57,7 @@ async def test_the_cards_show_the_states_in_plan_order_with_the_transitions_betw
         ]
 
 
-async def eventually(check, seconds=3.0):
+async def eventually(check, seconds=10.0):
     """Waits for `check()` to hold, as the cards refresh on their own schedule."""
     for _ in range(int(seconds / 0.05)):
         if check():
@@ -93,7 +97,7 @@ async def test_a_field_left_empty_is_not_written(lesson):
     async with open_lesson(lesson) as user:
         edit(user, "titulo-S0", "  ")
 
-        await user.should_see("Preencha este campo.")
+        await user.should_see("Preencha este campo.", retries=TURN)
     assert plan(lesson)["estados"][0]["titulo"] == "Quadrado"
 
 
@@ -164,7 +168,7 @@ async def test_approving_sends_one_message_with_the_plan_changes_and_every_comme
 
         user.find("Aprovar plano").click()
 
-        await user.should_see("Vou seguir o plano.")
+        await user.should_see("Vou seguir o plano.", retries=TURN)
         assert messages(agent) == [
             "Aprovei o plano.\n"
             "\n"
@@ -204,7 +208,7 @@ async def test_approving_an_untouched_plan_says_so(lesson):
     async with open_lesson(lesson, agent) as user:
         user.find("Aprovar plano").click()
 
-        await user.should_see("Vou seguir o plano.")
+        await user.should_see("Vou seguir o plano.", retries=TURN)
     assert messages(agent) == ["Aprovei o plano como está, sem mudanças nem comentários."]
 
 
@@ -216,7 +220,7 @@ async def test_approving_keeps_the_rest_of_the_plan_file_as_it_was(example):
         user.find(marker="comentar-S5").click()
         user.find("Aprovar plano").click()
 
-        await user.should_see("Vou seguir o plano.")
+        await user.should_see("Vou seguir o plano.", retries=TURN)
     assert (example / "plano.yaml").read_text(encoding="utf-8") == before.replace(
         '    comentarios:\n      - O rótulo "Colisão" está perto da borda de cima do quadro.\n', ""
     ).replace("    comentarios:\n      - Confirmar com o grupo que os eixos oblíquos vêm antes deste diagrama.\n", "")
@@ -230,8 +234,8 @@ async def test_approving_while_the_agent_works_sends_nothing_and_keeps_the_comme
 
         user.find("Aprovar plano").click()
 
-        await user.should_see("Espere o agente terminar para aprovar o plano.")
-        await user.should_see("Pronto.")
+        await user.should_see("Espere o agente terminar para aprovar o plano.", retries=TURN)
+        await user.should_see("Pronto.", retries=TURN)
         assert messages(agent) == ["oi"]
         assert "Talvez deslocar mais." in cards(user)
     assert plan(lesson)["estados"][1]["comentarios"] == ["Talvez deslocar mais."]
@@ -261,7 +265,7 @@ async def test_the_cards_follow_a_plan_the_agent_writes(lesson):
         user.find("Enviar").click()
 
         await eventually(lambda: cards(user)[:3] == ["Plano", "A", "Título: Antes"])
-        await user.should_see("Aprovar plano")
+        await user.should_see("Aprovar plano", retries=TURN)
 
 
 async def test_an_approval_after_the_agent_rewrote_the_plan_only_reports_the_teacher_changes(lesson):
@@ -276,7 +280,7 @@ async def test_an_approval_after_the_agent_rewrote_the_plan_only_reports_the_tea
         edit(user, "titulo-B", "Depois de andar")
         user.find("Aprovar plano").click()
 
-        await user.should_see("Sigo.")
+        await user.should_see("Sigo.", retries=TURN)
     assert messages(agent)[1] == (
         "Aprovei o plano.\n"
         "\n"
@@ -369,7 +373,7 @@ async def test_approving_a_plan_the_agent_just_rewrote_does_not_overwrite_it(les
         (lesson / "plano.yaml").write_text(TWO_STATES, encoding="utf-8")
         user.find("Aprovar plano").click()
 
-        await user.should_see("O plano mudou. Confira os cartões e aprove de novo.")
+        await user.should_see("O plano mudou. Confira os cartões e aprove de novo.", retries=TURN)
         assert messages(agent) == []
         assert cards(user)[1:3] == ["A", "Título: Antes"]
     assert (lesson / "plano.yaml").read_text(encoding="utf-8") == TWO_STATES
@@ -390,15 +394,15 @@ async def test_approving_again_after_the_agent_failed_resends_the_changes_and_co
     async with open_lesson(lesson, agent) as user:
         edit(user, "titulo-S1", "Quadrado na direita")
         user.find("Aprovar plano").click()
-        await user.should_see("Erro do agente: Sem conexão.")
+        await user.should_see("Erro do agente: Sem conexão.", retries=TURN)
 
         user.find("Aprovar plano").click()
-        await user.should_see("O agente parou por um erro inesperado.")
+        await user.should_see("O agente parou por um erro inesperado.", retries=TURN)
 
         user.find(marker="comentario-S0").type("Mais azul.")
         user.find(marker="comentar-S0").click()
         user.find("Aprovar plano").click()
-        await user.should_see("Sigo.")
+        await user.should_see("Sigo.", retries=TURN)
 
     first, second, third = messages(agent)
     assert second == first
