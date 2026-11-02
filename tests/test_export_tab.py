@@ -34,7 +34,7 @@ def choose(user, preset):
 async def test_offers_the_four_presets_with_their_defaults(lesson):
     async with open_export_tab(lesson) as user:
         with user:
-            (presets,) = user.find(marker="preset").elements
+            (presets,) = user.find(marker="export-preset").elements
         assert list(presets.options.values()) == [
             "PowerPoint",
             "PowerPoint web / Google Slides",
@@ -94,7 +94,7 @@ async def test_runs_the_cli_with_the_chosen_preset_and_settings_and_lists_the_fi
 
 async def test_a_scene_that_fails_is_reported_in_portuguese_and_the_tab_recovers(lesson):
     scenes = lesson / "cenas.py"
-    scenes.write_text(scenes.read_text(encoding="utf-8") + "\nraise ValueError('quebrada')\n", encoding="utf-8")
+    scenes.write_text(scenes.read_text(encoding="utf-8") + "\nraise ValueError('quebrada')\n", encoding="utf-8", newline="\n")
 
     async with open_export_tab(lesson) as user:
         choose(user, "Beamer / PDF")
@@ -111,7 +111,7 @@ async def test_a_scene_that_fails_is_reported_in_portuguese_and_the_tab_recovers
 
 
 async def test_plan_problems_are_listed(lesson):
-    (lesson / "plano.yaml").write_text("estados: []\ntransicoes: []\n", encoding="utf-8")
+    (lesson / "plano.yaml").write_text("estados: []\ntransicoes: []\n", encoding="utf-8", newline="\n")
 
     async with open_export_tab(lesson) as user:
         user.find(marker="run-export").click()
@@ -161,7 +161,7 @@ async def test_a_button_opens_the_folder_of_the_exported_files(lesson, monkeypat
 
 async def test_a_lesson_without_transitions_is_told_in_portuguese_why_it_has_no_video(lesson):
     plan = lesson / "plano.yaml"
-    plan.write_text(plan.read_text(encoding="utf-8").split("\ntransicoes:")[0], encoding="utf-8")
+    plan.write_text(plan.read_text(encoding="utf-8").split("\ntransicoes:")[0], encoding="utf-8", newline="\n")
 
     async with open_export_tab(lesson) as user:
         choose(user, "Vídeo da aula inteira")

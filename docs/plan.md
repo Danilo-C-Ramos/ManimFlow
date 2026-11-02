@@ -49,6 +49,20 @@ Each transition is a short video that starts on one state's image and ends on th
 
 Two neighbouring states without a transition between them are a plain slide change, with no video. A state can repeat an earlier image under a new id. In the bundled example, `S3v` shows the S3 image again so that the boost transition can start from it after the S5 detour.
 
+## Plan cards in the app
+
+The lesson screen draws the plan as one card per state, with each transition's approximate duration and description between the cards. Once a state's scene is rendered, its card shows the image, so the cards also serve as the lesson's timeline.
+
+The teacher's changes go straight to `plano.yaml`, and the file stays valid:
+
+- **Inline edits** change a state's `titulo` and `visivel`. A field left empty is not written.
+- **Comments** go to the state's `comentarios`.
+- **"+ estado"** appends a state with the next free id (`S<n>`). It needs a scene to be valid, so it reuses the previous state's scene until the agent draws its own, the same way `S3v` repeats the S3 image.
+
+The file is written back with its YAML comments and blank lines in place.
+
+**"Aprovar plano"** sends the agent one message with a diff of `plano.yaml` since the agent last wrote it (comments left out) and every comment, each with its state. The comments are then removed from the file, since the agent has them. When the agent rewrites `plano.yaml`, the cards redraw and the next diff starts from the agent's version.
+
 ## Validation
 
 `manimflow plan validate <lesson> [--json]` exits non-zero when the plan has any of these problems. Each one gets its own message in Portuguese:

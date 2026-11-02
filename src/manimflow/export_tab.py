@@ -43,7 +43,7 @@ class ExportPanel:
             ui.label("Exportar").classes("text-lg")
             self.preset = ui.radio(
                 {name: _NAMES[name].title for name in PRESETS}, value="powerpoint", on_change=self._use_defaults
-            ).mark("preset")
+            ).mark("export-preset")
             self.description = ui.label().classes("text-grey-7")
             with ui.row().classes("w-full gap-4"):
                 self.resolution = ui.number(

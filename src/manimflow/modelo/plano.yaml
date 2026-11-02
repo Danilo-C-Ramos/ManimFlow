@@ -1,0 +1,9 @@
+# Os estados da aula na ordem dos slides e as transições entre eles.
+# Este primeiro estado só guarda o lugar até o agente propor o plano.
+estados:
+  - id: S0
+    titulo: Primeiro estado
+    visivel: Ainda a definir. Conte ao agente o que a aula deve mostrar.
+    cena: S0_Inicio
+
+transicoes: []

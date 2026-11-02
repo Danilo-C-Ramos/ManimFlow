@@ -44,7 +44,7 @@ _View = tuple[_Card, ...] | _Message
 class PreviewPanel:
     def __init__(self, lesson: Path) -> None:
         self.lesson = lesson
-        self.served_at = _serve_outputs(lesson)
+        self.served_at = serve_outputs(lesson)
         # The plan, checked again only when it or the scenes file changes.
         self._plan_stamp: tuple[int, ...] | None = None
         self._plan: Plan | _Message = _Message("")
@@ -84,10 +84,12 @@ class PreviewPanel:
         transitions = {transition.source: transition for transition in plan.transitions}
         cards: list[_Card] = []
         for state in plan.states:
-            cards.append(_Card("state", f"{state.id} · {state.title}", self._latest(state.scene, "png")))
+            image = latest_render(self.lesson, self.served_at, state.scene, "png")
+            cards.append(_Card("state", f"{state.id} · {state.title}", image))
             if transition := transitions.get(state.id):
                 title = f"{transition.source} → {transition.target}"
-                cards.append(_Card("transition", title, self._latest(transition.scene, "mp4")))
+                video = latest_render(self.lesson, self.served_at, transition.scene, "mp4")
+                cards.append(_Card("transition", title, video))
         return tuple(cards)
 
     def _current_plan(self) -> Plan | _Message:
@@ -96,19 +98,6 @@ class PreviewPanel:
             self._plan = _read_plan(self.lesson)
             self._plan_stamp = stamp
         return self._plan
-
-    def _latest(self, scene: str, extension: str) -> str | None:
-        """The URL of the scene's newest output with this extension, preview or final, if ever rendered."""
-        rendered: list[tuple[int, Path]] = []
-        for _, folder in QUALITIES.values():
-            path = self.lesson / folder / extension / f"{scene}.{extension}"
-            if modified := _modified(path):
-                rendered.append((modified, path))
-        if not rendered:
-            return None
-        modified, path = max(rendered)
-        # The same name gets new content on every render, so the browser must not reuse the old one.
-        return f"{self.served_at}/{path.relative_to(self.lesson).as_posix()}?v={modified}"
 
     def _build(self) -> None:
         self.content.clear()
@@ -149,6 +138,23 @@ def _draw(card: _Card) -> None:
         ui.video(card.url).classes("w-full")
 
 
+def latest_render(lesson: Path, served_at: str, scene: str, extension: str) -> str | None:
+    """The URL of the scene's newest output with this extension, preview or final, if ever rendered.
+
+    `served_at` is the URL path `serve_outputs` returned for the lesson.
+    """
+    rendered: list[tuple[int, Path]] = []
+    for _, folder in QUALITIES.values():
+        path = lesson / folder / extension / f"{scene}.{extension}"
+        if modified := _modified(path):
+            rendered.append((modified, path))
+    if not rendered:
+        return None
+    modified, path = max(rendered)
+    # The same name gets new content on every render, so the browser must not reuse the old one.
+    return f"{served_at}/{path.relative_to(lesson).as_posix()}?v={modified}"
+
+
 def _modified(path: Path) -> int:
     """The file's modification time in nanoseconds, 0 when it doesn't exist."""
     try:
@@ -158,7 +164,7 @@ def _modified(path: Path) -> int:
         return 0
 
 
-def _serve_outputs(lesson: Path) -> str:
+def serve_outputs(lesson: Path) -> str:
     """Serves the lesson's output folder, once, and returns the URL path the lesson is served under."""
     prefix = f"/_manimflow/aula/{hashlib.sha256(str(lesson.resolve()).encode()).hexdigest()[:16]}"
     folder = f"{prefix}/{OUTPUT_DIR}"
