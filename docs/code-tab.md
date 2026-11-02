@@ -5,7 +5,7 @@ The lesson screen's "Código" tab shows `fisica.py` and `cenas.py` in a CodeMirr
 ## "Renderizar"
 
 1. Every file with unsaved edits is written, keeping the line endings it already had (LF for a new file), then committed as `Edição manual em fisica.py` (or `em fisica.py e cenas.py`). See [versioning](versioning.md).
-2. Every scene in the plan is previewed, in plan order, through `manimflow preview <lesson> <scene> --json`, the same CLI the agent uses. A change to `fisica.py` can affect any scene, so all of them are rendered. The first scene that fails stops the run, and the tab shows `A cena S2 não renderizou:` followed by the last line of Manim's output, which is the Python error.
+2. The scenes the edit affects are previewed, in plan order, through `manimflow preview <lesson> <scene> --json`, the same CLI the agent uses. A change to `fisica.py` can affect any scene, so all of the plan's scenes are rendered. A change to `cenas.py` renders the plan's scenes whose class changed, and those built on a changed class; a change outside the classes (imports, helpers) renders them all. The first scene that fails stops the run, and the tab shows `A cena S2 não renderizou:` followed by the last line of Manim's output, which is the Python error.
 3. The preview panel picks the new renders up on its own.
 
 When the commit fails (say, a `.git/index.lock` left behind by a crash), the tab says so and still renders: the files are saved, and the next commit picks them up.
@@ -21,6 +21,6 @@ The tab checks both files twice a second. When the agent (or another editor) cha
 
 ## The diff to the agent
 
-Before each message, the chat writes `History.manual_changes()` to `.manimflow/edicoes-manuais.diff` and sends that file as an attachment (the agent interface takes attachments as file paths). The folder is not versioned. Once the agent's turn ends, the diff starts over, so each edit reaches the agent once. Unsaved edits in the editor are not part of it. The agent instructions tell the agent to build on these edits and never undo them unless the teacher asks.
+Before each message, the chat writes `History.manual_changes()` to `.manimflow/edicoes-manuais.diff` and sends that file as an attachment (the agent interface takes attachments as file paths). The folder is not versioned. Once the agent's turn ends, the diff starts over, so each edit reaches the agent once. Unsaved edits in the editor are not part of it, and neither are the plan cards' edits, which go with "Aprovar plano". The agent instructions tell the agent to build on these edits and never undo them unless the teacher asks.
 
 When the diff can't be read, the message still goes, and the chat says the edits could not be sent.

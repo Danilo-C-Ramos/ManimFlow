@@ -1,7 +1,8 @@
 """The plan cards: the lesson's plano.yaml as one card per state, with the transitions between them.
 
 The teacher edits the cards in place, and every change is written back to
-plano.yaml at once. Once a state is rendered, its card shows the image, so the
+plano.yaml at once. The edits are committed as the teacher's when the next turn
+starts, and the comments stay in the file until an approval's turn handles them. Once a state is rendered, its card shows the image, so the
 cards become the lesson's timeline.
 """
 
@@ -10,6 +11,7 @@ import difflib
 import io
 import logging
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any, Protocol
 
 import yaml
@@ -20,13 +22,17 @@ from ruamel.yaml.comments import CommentedMap, CommentedSeq
 from ruamel.yaml.scalarstring import SingleQuotedScalarString
 from ruamel.yaml.tokens import CommentToken
 
+from manimflow.lessons import PLACEHOLDER_SCENE
 from manimflow.plan import PLAN_FILE, validate_plan
 from manimflow.preview import REFRESH_INTERVAL, latest_render, serve_outputs
 from manimflow.render import SCENES_FILE
+from manimflow.versioning import History
 
 logger = logging.getLogger(__name__)
 
 FILL_IN = "Preencha este campo."
+CARD_EDITS = f"Edição manual em {PLAN_FILE}"
+HANDLED_COMMENTS = "Comentários do plano atendidos"
 
 
 class Chat(Protocol):
@@ -35,20 +41,23 @@ class Chat(Protocol):
     @property
     def busy(self) -> bool: ...
 
-    async def submit(self, text: str) -> bool:
-        """False when the agent's turn failed."""
+    def on_busy(self, listener: Callable[[bool], None]) -> None:
+        """Calls `listener` with True when a turn starts, before anything is committed."""
+        ...
+
+    async def submit(self, text: str, summary: str | None = None) -> bool:
+        """False when the agent's turn failed; `summary` names the turn's version."""
         ...
 
 
 class PlanCards:
-    def __init__(self, lesson: Path, chat: Chat) -> None:
+    def __init__(self, lesson: Path, chat: Chat, history: History) -> None:
         self.lesson = lesson
         self.chat = chat
+        self.history = history
         # The plan's text as the cards show it, and as the agent last saw it, to tell it what the teacher changed.
         self.text: str | None = None
         self.approved = ""
-        # Comments of an approval whose turn failed, sent again with the next one.
-        self.unsent: list[str] = []
         self.plan: Any = None
         self._stamp: tuple[int, ...] = ()
         self.served_at = serve_outputs(lesson)
@@ -63,6 +72,18 @@ class PlanCards:
         self._build()
         self._refresh()
         ui.timer(REFRESH_INTERVAL, self._refresh)
+        chat.on_busy(self._commit_edits)
+
+    def _commit_edits(self, busy: bool) -> None:
+        """Commits the cards' edits as the teacher's before a turn starts, so neither the
+        agent's version nor the edits made outside ManimFlow take them."""
+        if not busy or self.text is None or self.text != _read(self.lesson / PLAN_FILE):
+            return
+        try:
+            self.history.commit_manual_edit(CARD_EDITS, [PLAN_FILE])
+        except Exception:
+            # The turn's own commits pick the edits up.
+            logger.exception("Committing the plan edits failed")
 
     def _refresh(self) -> None:
         """Redraws the cards when the plan changes on disk, by the agent or anyone but these cards,
@@ -105,7 +126,8 @@ class PlanCards:
             # The agent may be rewriting the plan right now; the next look will read it whole.
             logger.debug("Plan refresh failed", exc_info=True)
             self.plan = None
-        self.approve_button.set_visibility(self.plan is not None)
+        # The scaffold's placeholder is no plan yet: the agent writes the first one.
+        self.approve_button.set_visibility(self.plan is not None and not _placeholder(self.plan))
         self._build()
         return True
 
@@ -118,23 +140,42 @@ class PlanCards:
         if self._refresh_plan():
             ui.notify("O plano mudou. Confira os cartões e aprove de novo.")
             return
-        comments = list(self.unsent)
-        for state in self.plan["estados"]:
-            comments += [f"- {state['id']} ({state['titulo']}): {comment}" for comment in _comments(state)]
-            _set_comments(state, [])
-        self._write()
+        sent_comments = [(state["id"], comment) for state in self.plan["estados"] for comment in _comments(state)]
+        titles = {state["id"]: state["titulo"] for state in self.plan["estados"]}
+        comments = [f"- {state} ({titles[state]}): {comment}" for state, comment in sent_comments]
         previous = self.approved
-        before, sent = _without_comments(previous), _dump(self.plan)
+        before, sent = _without_comments(previous), _without_comments(_dump(self.plan))
         self.approved = sent
-        self._build()
-        if await self.chat.submit(_approval(before, sent, comments)):
-            self.unsent = []
+        if not await self.chat.submit(_approval(before, sent, comments), summary="Aprovei o plano"):
+            # The comments stay on the file for the next approval, and a plan the agent
+            # rewrote meanwhile is the new baseline.
+            if self.approved == sent:
+                self.approved = previous
             return
-        # The agent never handled them, so the next approval carries them again. The comments
-        # stay off the file, and a plan the agent rewrote meanwhile is the new baseline.
-        self.unsent = comments
-        if self.approved == sent:
-            self.approved = previous
+        self._clear_handled(sent_comments)
+
+    def _clear_handled(self, handled: list[tuple[str, str]]) -> None:
+        """Takes the comments the agent handled off the plan on disk, leaving any the
+        teacher wrote during the turn."""
+        self._refresh_plan()
+        if self.plan is None:
+            return
+        cleared = False
+        for state in self.plan["estados"]:
+            comments = _comments(state)
+            for handled_state, comment in handled:
+                if handled_state == state["id"] and comment in comments:
+                    comments.remove(comment)
+                    cleared = True
+            _set_comments(state, comments)
+        if not cleared:
+            return
+        self._write()
+        self._build()
+        try:
+            self.history.commit_manual_edit(HANDLED_COMMENTS, [PLAN_FILE])
+        except Exception:
+            logger.exception("Committing the handled comments failed")
 
     def _build(self) -> None:
         self.content.clear()
@@ -233,6 +274,19 @@ class PlanCards:
         path = self.lesson / PLAN_FILE
         # The file's own line endings, so its history shows only what changed.
         path.write_text(self.text, encoding="utf-8", newline=_line_ending(path))
+
+
+def _read(path: Path) -> str | None:
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def _placeholder(plan: Any) -> bool:
+    """Whether the plan is still the new lesson's placeholder, with states the teacher
+    may have added, all on the scaffold's empty scene."""
+    return not plan.get("transicoes") and all(state["cena"] == PLACEHOLDER_SCENE for state in plan["estados"])
 
 
 def _line_ending(path: Path) -> str:

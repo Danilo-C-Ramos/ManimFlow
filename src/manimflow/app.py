@@ -100,10 +100,10 @@ def lesson_page(agent: Agent, lesson: Path) -> Callable[[], Awaitable[None]]:
                     with ui.tab_panels(tabs, value="Prévia").classes("w-full"):
                         with ui.tab_panel("Prévia").classes("p-0"):
                             with ui.scroll_area().classes("h-[calc(100vh-9rem)]"):
-                                PlanCards(lesson, chat)
+                                PlanCards(lesson, chat, history)
                                 PreviewPanel(lesson)
                         with ui.tab_panel("Código").classes("p-0"):
-                            chat.on_busy = CodeTab(lesson, history).set_agent_working
+                            chat.on_busy(CodeTab(lesson, history).set_agent_working)
                         with ui.tab_panel("Equações").classes("p-0"):
                             with ui.scroll_area().classes("h-[calc(100vh-9rem)]"):
                                 EquationsPanel(lesson)
@@ -186,7 +186,7 @@ class Chat:
         self.session = session
         self.history = history
         # Told when a turn starts and ends, for whatever must wait for the agent.
-        self.on_busy: Callable[[bool], None] = lambda busy: None
+        self._busy_listeners: list[Callable[[bool], None]] = []
         with ui.column().classes("w-full max-w-3xl mx-auto h-[calc(100vh-6rem)]"):
             with ui.scroll_area().classes("grow w-full") as self.scroll:
                 self.conversation = ui.column().classes("w-full gap-2").mark("conversation")
@@ -204,6 +204,11 @@ class Chat:
                 self.input.on("keydown.enter", self.send)
                 self.button = ui.button("Enviar", on_click=self.send)
 
+    def on_busy(self, listener: Callable[[bool], None]) -> None:
+        """Calls `listener` with True when a turn starts, before anything is committed,
+        and with False when it ends."""
+        self._busy_listeners.append(listener)
+
     @property
     def busy(self) -> bool:
         """Whether the agent is still working on the last message."""
@@ -216,9 +221,10 @@ class Chat:
         self.input.value = ""
         await self.submit(text)
 
-    async def submit(self, text: str) -> bool:
+    async def submit(self, text: str, summary: str | None = None) -> bool:
         """Sends `text` as the teacher's message and shows the agent's turn as it streams.
 
+        The turn's version is named after `summary` when given, else after `text`.
         False when the turn failed.
         """
         self._set_busy(True)
@@ -244,7 +250,7 @@ class Chat:
             # Even a failed turn may have changed files, and they must not be lost. A message
             # the agent never got leaves the manual edits for the next one.
             if delivered:
-                self._save_version(lambda: self.history.commit_agent_turn(text))
+                self._save_version(lambda: self.history.commit_agent_turn(summary or text))
             self._set_busy(False)
         return ok
 
@@ -280,7 +286,8 @@ class Chat:
         self.input.set_enabled(not busy)
         self.button.set_enabled(not busy)
         self.working.set_visibility(busy)
-        self.on_busy(busy)
+        for listener in self._busy_listeners:
+            listener(busy)
 
     def _show(self, event: Event) -> None:
         match event:

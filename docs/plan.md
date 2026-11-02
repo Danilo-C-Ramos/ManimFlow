@@ -53,7 +53,7 @@ Two neighbouring states without a transition between them are a plain slide chan
 
 The lesson screen draws the plan as one card per state, with each transition's approximate duration and description between the cards. Once a state's scene is rendered, its card shows the image, so the cards also serve as the lesson's timeline.
 
-The teacher's changes go straight to `plano.yaml`, and the file stays valid:
+The teacher's changes go straight to `plano.yaml`, and the file stays valid. They are committed as `Edição manual em plano.yaml` when the next turn starts:
 
 - **Inline edits** change a state's `titulo` and `visivel`. A field left empty is not written.
 - **Comments** go to the state's `comentarios`.
@@ -61,7 +61,7 @@ The teacher's changes go straight to `plano.yaml`, and the file stays valid:
 
 The file is written back with its YAML comments and blank lines in place.
 
-**"Aprovar plano"** sends the agent one message with a diff of `plano.yaml` since the agent last wrote it (comments left out) and every comment, each with its state. The comments are then removed from the file, since the agent has them. When the agent rewrites `plano.yaml`, the cards redraw and the next diff starts from the agent's version.
+**"Aprovar plano"** sends the agent one message with a diff of `plano.yaml` since the agent last wrote it (comments left out) and every comment, each with its state. Once the turn ends well, the comments it carried are removed from the file, since the agent has them. After a failed turn they stay, so the next approval sends them again. A new lesson's placeholder plan (states on the scaffold's empty `S0_Inicio` scene, no transitions) has no "Aprovar plano" button: the agent writes the first plan. When the agent rewrites `plano.yaml`, the cards redraw and the next diff starts from the agent's version.
 
 ## Validation
 

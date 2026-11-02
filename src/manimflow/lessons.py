@@ -25,6 +25,8 @@ PROFILE_FILE = "perfil.md"
 _PACKAGE = Path(str(files("manimflow")))
 # What a new lesson starts from: a plan with one placeholder state, and its empty scene.
 _SCAFFOLD = _PACKAGE / "modelo"
+# The scene of the scaffold's placeholder state, until the agent writes the plan.
+PLACEHOLDER_SCENE: str = yaml.safe_load((_SCAFFOLD / PLAN_FILE).read_text(encoding="utf-8"))["estados"][0]["cena"]
 _EXAMPLES = _PACKAGE / "exemplos"
 EXAMPLE_NAME = "Relatividade - herói e espelho"
 # The bundled example's profile is also every teacher's first one.

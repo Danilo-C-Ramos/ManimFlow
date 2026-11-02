@@ -1,6 +1,7 @@
 import asyncio
 from contextlib import asynccontextmanager
 
+import pygit2
 import yaml
 from nicegui import ui
 from nicegui.testing.user_simulation import user_simulation
@@ -407,7 +408,8 @@ async def test_approving_again_after_the_agent_failed_resends_the_changes_and_co
     first, second, third = messages(agent)
     assert second == first
     assert first.endswith("Comentários:\n- S1 (Quadrado na direita): Talvez deslocar mais.")
-    assert third == first + "\n- S0 (Quadrado): Mais azul."
+    # In plan order.
+    assert third == first.replace("\n- S1", "\n- S0 (Quadrado): Mais azul.\n- S1")
 
 
 async def test_a_new_lesson_from_the_scaffold_shows_its_placeholder_state_and_stays_valid(manimflow, tmp_path):
@@ -420,6 +422,8 @@ async def test_a_new_lesson_from_the_scaffold_shows_its_placeholder_state_and_st
             "Título: Primeiro estado",
             "O que aparece: Ainda a definir. Conte ao agente o que a aula deve mostrar.",
         ]
+        # There is no plan to approve until the agent writes one.
+        await user.should_not_see("Aprovar plano")
         user.find("+ estado").click()
         user.find(marker="comentario-S1").type("Começar pelos eixos.")
         user.find(marker="comentar-S1").click()
@@ -437,3 +441,52 @@ async def test_an_edit_keeps_the_plan_file_line_endings(lesson):
             edit(user, "titulo-S0", "Quadrado azul")
 
         assert path.read_bytes() == original.replace(b"titulo: Quadrado" + ending.encode(), b"titulo: Quadrado azul" + ending.encode())
+
+
+async def test_the_comments_of_an_approval_that_failed_stay_in_the_plan(lesson):
+    agent = ScriptedAgent([[AgentError("Sem conexão.")]])
+    async with open_lesson(lesson, agent) as user:
+        user.find("Aprovar plano").click()
+        await user.should_see("Erro do agente: Sem conexão.", retries=TURN)
+
+        assert "Talvez deslocar mais." in cards(user)
+    # So a reload, or a new launch, still has them for the next approval.
+    assert plan(lesson)["estados"][1]["comentarios"] == ["Talvez deslocar mais."]
+
+
+def history_of(lesson):
+    """The message of every commit in the lesson's repository, newest first."""
+    repo = pygit2.Repository(str(lesson / ".git"))
+    return [commit.message for commit in repo.walk(repo.head.target)]
+
+
+async def test_an_approval_commits_the_card_edits_apart_and_sends_the_plan_diff_only_once(lesson):
+    agent = ScriptedAgent([[EditFile("CONTEXTO.md", "# Contexto\n"), AssistantText("Vou seguir o plano.")]])
+    async with open_lesson(lesson, agent) as user:
+        edit(user, "titulo-S1", "Quadrado na direita")
+        user.find("Aprovar plano").click()
+        await user.should_see("Vou seguir o plano.", retries=TURN)
+
+    (approval,) = agent.received
+    assert "+    titulo: Quadrado na direita" in approval.text
+    # The approval holds the plan diff; the manual-edit attachment would hold it again.
+    assert approval.attachments == {}
+    assert history_of(lesson)[:3] == [
+        "Comentários do plano atendidos",
+        "Pedido: Aprovei o plano",
+        "Edição manual em plano.yaml",
+    ]
+
+
+async def test_a_message_with_card_edits_not_yet_approved_carries_no_plan_diff(lesson):
+    agent = ScriptedAgent([[EditFile("CONTEXTO.md", "# Contexto\n"), AssistantText("Pronto.")]])
+    async with open_lesson(lesson, agent) as user:
+        user.find(marker="comentario-S0").type("Mais azul.")
+        user.find(marker="comentar-S0").click()
+        user.find(marker="message").type("deixe o fundo branco")
+        user.find("Enviar").click()
+        await user.should_see("Pronto.", retries=TURN)
+
+    (message,) = agent.received
+    assert message.attachments == {}
+    assert history_of(lesson)[:2] == ["Pedido: deixe o fundo branco", "Edição manual em plano.yaml"]

@@ -157,7 +157,7 @@ class CodeTab:
             self.saved[name] = self.drafts[name]
         if edited:
             try:
-                self.history.commit_manual_edit(f"Edição manual em {' e '.join(edited)}")
+                self.history.commit_manual_edit(f"Edição manual em {' e '.join(edited)}", edited)
             except Exception:
                 # The files are saved; the next commit picks them up.
                 logger.exception("Commit failed")
