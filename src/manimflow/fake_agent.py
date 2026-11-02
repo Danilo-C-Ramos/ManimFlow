@@ -30,7 +30,7 @@ from manimflow.agent import (
     teachers_words,
     with_attachments,
 )
-from manimflow.model_presets import DEFAULT
+from manimflow.model_presets import DEFAULT, MODEL
 
 
 @dataclass(frozen=True)
@@ -66,7 +66,7 @@ Scenario = list[list[Step]]
 
 ACCOUNT = Account(logged_in=True, method="chatgpt", email="professora@example.com")
 MODELS = [
-    ModelOption("gpt-6.1-sol", "GPT-6.1-Sol", ("low", "medium", "high", "xhigh"), "low"),
+    ModelOption(MODEL, "GPT-6.1-Sol", ("low", "medium", "high", "xhigh"), "low"),
     ModelOption("gpt-6-luna", "GPT-6-Luna", ("low", "medium", "high"), "medium"),
 ]
 

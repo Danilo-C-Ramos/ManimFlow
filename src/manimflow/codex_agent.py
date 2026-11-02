@@ -287,9 +287,8 @@ class CodexAgent:
         if (await self.account()).method != "chatgpt":
             return None
         codex = await self._client()
-        # The SDK has no wrapper for this request.
         try:
-            usage = await codex._client.request(
+            usage = await _rpc(codex).request(
                 "account/rateLimits/read", None, response_model=GetAccountRateLimitsResponse
             )
         except CodexError as error:
@@ -307,6 +306,11 @@ class CodexAgent:
             self._codex = None
 
 
+def _rpc(codex: AsyncCodex) -> AsyncCodexClient:
+    """The SDK's JSON-RPC client, for the app-server requests the SDK has no wrapper for."""
+    return codex._client
+
+
 def _quota_window(window: RateLimitWindow) -> QuotaWindow:
     resets_at = datetime.fromtimestamp(window.resets_at, UTC) if window.resets_at is not None else None
     return QuotaWindow(window.used_percent, window.window_duration_mins, resets_at)
@@ -315,10 +319,9 @@ def _quota_window(window: RateLimitWindow) -> QuotaWindow:
 async def _set_up_windows_sandbox(codex: AsyncCodex, home: Path) -> None:
     """Prepares Codex's Windows sandbox, and waits until it can enter the teacher's folders.
 
-    See docs/adr/0003-windows-sandbox-runs-elevated.md. The SDK has no wrapper for
-    these requests, so they go through its JSON-RPC client.
+    See docs/adr/0003-windows-sandbox-runs-elevated.md.
     """
-    client = codex._client
+    client = _rpc(codex)
     readiness = await client.request("windowsSandbox/readiness", None, response_model=WindowsSandboxReadinessResponse)
     if readiness.status != WindowsSandboxReadiness.ready:
         # Only the elevated mode cuts the network. It asks for administrator once;
