@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from PIL import Image
 from openai_codex.generated.v2_all import (
     CommandExecResponse,
     WindowsSandboxReadiness,
@@ -24,10 +25,13 @@ from manimflow.agent import (
     CommandFinished,
     CommandStarted,
     FileChanged,
+    ImageViewed,
+    Message,
     ModelSettings,
 )
-from manimflow.codex_agent import BASE_INSTRUCTIONS, CodexAgent, _set_up_windows_sandbox
-from mock_model import command, message, patch
+from manimflow.codex_agent import BASE_INSTRUCTIONS, SKILL, CodexAgent, _set_up_windows_sandbox
+from manimflow.model_presets import CAREFUL, QUICK
+from mock_model import command, message, patch, view_image
 
 
 @pytest.fixture
@@ -59,8 +63,8 @@ def developer_text(request):
 
 def user_text(request):
     """The text of the last message the teacher sent, as the model received it."""
-    (*_, last) = [item for item in request["input"] if item.get("role") == "user"]
-    return "\n".join(part["text"] for part in last["content"] if part.get("type") == "input_text")
+    (*_, last) = [text for text in user_messages(request) if not text.startswith("<skill>")]
+    return last
 
 
 async def turn(session, text="oi", attachments=()):
@@ -74,6 +78,33 @@ async def test_every_new_thread_receives_the_base_instructions(codex_agent, mock
     assert len(mock_model.requests) == 2
     for request in mock_model.requests:
         assert BASE_INSTRUCTIONS in developer_text(request)
+
+
+def user_messages(request):
+    """The text of every message the model received as the user's, in order."""
+    return [
+        "\n".join(part["text"] for part in item["content"] if part.get("type") == "input_text")
+        for item in request["input"]
+        if item.get("role") == "user"
+    ]
+
+
+async def test_every_new_thread_starts_with_the_manimflow_skill(codex_agent, mock_model, lesson):
+    body = SKILL.read_text(encoding="utf-8").split("---", 2)[2].strip()
+    for _ in range(2):
+        session = await codex_agent.start_session(lesson)
+        await turn(session, "primeira")
+        await turn(session, "segunda")
+
+    def skills_sent(request):
+        # Codex sends the file as written, and on Windows the installed copy has CRLF.
+        return sum(body in text.replace("\r\n", "\n") for text in user_messages(request))
+
+    first, second, *_ = mock_model.requests
+    assert skills_sent(first) == 1
+    # The skill stays in the thread's history; later turns don't send it again.
+    assert skills_sent(second) == 1
+    assert skills_sent(mock_model.requests[2]) == 1
 
 
 async def test_commands_and_replies_become_interface_events_in_order(codex_agent, mock_model, lesson):
@@ -117,6 +148,63 @@ async def test_file_edits_are_reported_relative_to_the_lesson(codex_agent, mock_
     ]
 
 
+async def test_past_sessions_are_the_lessons_threads_where_the_teacher_wrote(codex_agent, mock_model, lesson):
+    other = lesson.parent / "Outra aula"
+    other.mkdir()
+    mock_model.reply(message("Desenhei o espelho."))
+    mock_model.reply(message("Aumentei a fonte."))
+    mock_model.reply(message("Desenhei a onda."))
+    first = await codex_agent.start_session(lesson)
+    await turn(first, "desenha o espelho")
+    second = await codex_agent.start_session(lesson)
+    await turn(second, "aumenta a fonte")
+    await turn(await codex_agent.start_session(other), "desenha a onda")
+    await codex_agent.start_session(lesson)
+
+    sessions = await codex_agent.past_sessions(lesson)
+
+    assert [(past.id, past.first_request) for past in sessions] == [
+        (second.id, "aumenta a fonte"),
+        (first.id, "desenha o espelho"),
+    ]
+    assert sessions[1].started_at <= sessions[0].started_at
+
+
+async def test_a_past_session_returns_the_conversation_without_its_commands(codex_agent, mock_model, lesson):
+    mock_model.reply(message("Vou listar a pasta."), command("c1", "ls"))
+    mock_model.reply(message("Pronto."))
+    mock_model.reply(message("Fonte maior."))
+    session = await codex_agent.start_session(lesson)
+    await turn(session, "lista a pasta")
+    await turn(session, "aumenta a fonte")
+
+    assert await codex_agent.session_messages(session.id) == [
+        Message("teacher", "lista a pasta"),
+        Message("agent", "Vou listar a pasta."),
+        Message("agent", "Pronto."),
+        Message("teacher", "aumenta a fonte"),
+        Message("agent", "Fonte maior."),
+    ]
+
+
+async def test_the_frames_the_agent_looks_at_become_events(codex_agent, mock_model, lesson):
+    frame = lesson / "saida" / "previa" / "quadros" / "S0-S1_fim.png"
+    frame.parent.mkdir(parents=True)
+    Image.new("RGB", (8, 8), "white").save(frame)
+    mock_model.reply(view_image("v1", "saida/previa/quadros/S0-S1_fim.png"))
+    mock_model.reply(message("O quadro final está certo."))
+
+    events = await turn(await codex_agent.start_session(lesson))
+
+    assert events == [ImageViewed("saida/previa/quadros/S0-S1_fim.png"), AssistantText("O quadro final está certo.")]
+    assert any(
+        part.get("type") == "input_image"
+        for item in mock_model.requests[-1]["input"]
+        if item.get("call_id") == "v1" and "output" in item
+        for part in item["output"]
+    )
+
+
 def tool_names(request):
     """Names of every tool offered to the model, nested ones included."""
 
@@ -148,6 +236,21 @@ async def test_the_agent_can_run_the_manimflow_cli(codex_agent, mock_model, less
 
     code, output = shell_result(mock_model.requests[-1], "c1")
     assert code == 0, output
+
+
+async def test_the_agent_can_run_the_lessons_physics_tests(codex_agent, mock_model, lesson):
+    (lesson / "fisica.py").write_text("def equacoes():\n    return []\n", encoding="utf-8")
+    (lesson / "test_fisica.py").write_text(
+        "from fisica import equacoes\n\n\ndef test_equacoes():\n    assert equacoes() == []\n", encoding="utf-8"
+    )
+    # The command the agent instructions give.
+    mock_model.reply(command("c1", "python -m pytest -q -p no:cacheprovider test_fisica.py"))
+
+    await turn(await codex_agent.start_session(lesson))
+
+    code, output = shell_result(mock_model.requests[-1], "c1")
+    assert code == 0, output
+    assert "1 passed" in output
 
 
 def shell_result(request, call_id):
@@ -251,7 +354,7 @@ async def test_a_sandbox_that_cant_start_stops_the_turn_before_the_model(codex_h
     finally:
         await agent.close()
 
-    assert events == [AgentError("O Ubuntu bloqueia o isolamento.")]
+    assert events == [AgentError("O Ubuntu bloqueia o isolamento.", delivered=False)]
     assert mock_model.requests == []
 
 
@@ -269,6 +372,20 @@ async def test_turns_use_the_model_settings(codex_agent, mock_model, lesson):
     await turn(session)
     assert model_used(mock_model.requests[-1]) == ModelSettings("gpt-5.5", "high")
     assert await codex_agent.model_settings() == ModelSettings("gpt-5.5", "high")
+
+
+async def test_turns_start_on_the_rapido_preset(codex_agent, mock_model, lesson):
+    await turn(await codex_agent.start_session(lesson))
+
+    assert model_used(mock_model.requests[-1]) == QUICK
+
+
+async def test_the_model_list_offers_the_presets(codex_agent):
+    models = {option.model: option for option in await codex_agent.models()}
+
+    assert QUICK.effort in models[QUICK.model].efforts
+    assert CAREFUL.effort in models[CAREFUL.model].efforts
+    assert all(option.default_effort in option.efforts for option in models.values())
 
 
 class FakeWindowsSandbox:
@@ -322,3 +439,22 @@ async def test_the_windows_sandbox_prefers_elevated_and_falls_back_without_admin
     assert sandbox.setups == setups
     # One command through the sandbox, which starts Codex's read grants for the teacher's folders.
     assert [command["cwd"] for command in sandbox.commands] == [str(tmp_path)]
+
+
+async def test_past_sessions_show_the_teachers_words_without_the_attachments(codex_agent, mock_model, lesson, tmp_path):
+    edits = tmp_path / "edicoes-manuais.diff"
+    edits.write_text("-COR_LUZ = AMARELO\n+COR_LUZ = VERMELHO\n", encoding="utf-8")
+    mock_model.reply(message("Mantive o vermelho."))
+    session = await codex_agent.start_session(lesson)
+    await turn(session, "renderiza de novo", [edits])
+    await codex_agent.start_session(lesson)
+
+    (past,) = await codex_agent.past_sessions(lesson)
+
+    assert past.first_request == "renderiza de novo"
+    assert await codex_agent.session_messages(session.id) == [
+        Message("teacher", "renderiza de novo"),
+        Message("agent", "Mantive o vermelho."),
+    ]
+    # An aware time, as the app compares and shows it in the teacher's time zone.
+    assert past.started_at.tzinfo is not None

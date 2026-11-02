@@ -1,3 +1,4 @@
+import json
 import shutil
 
 import av
@@ -301,3 +302,23 @@ def square_width(image: Image.Image) -> int:
     pixels = np.asarray(image.convert("RGB"), dtype=np.int16)
     columns = np.nonzero((pixels.max(axis=2) > 40).any(axis=0))[0]
     return int(columns.max() - columns.min())
+
+
+def test_export_reports_each_scene_it_renders_on_stderr(manimflow, lesson):
+    result = manimflow("export", str(lesson), "powerpoint", *SMALL, "--json")
+
+    progress = [json.loads(line)["progress"] for line in result.stderr.splitlines() if line.startswith("{")]
+    assert progress == [
+        {"scene": "S0", "number": 1, "of": 2},
+        {"scene": "T01", "number": 2, "of": 2},
+        {"scene": None, "number": 2, "of": 2},
+    ]
+
+
+def test_a_failed_export_names_the_scenes_that_failed(manimflow, lesson):
+    scenes = lesson / "cenas.py"
+    scenes.write_text(scenes.read_text(encoding="utf-8") + "\nraise ValueError('quebrada')\n", encoding="utf-8", newline="\n")
+
+    result = manimflow("export", str(lesson), "beamer", *SMALL, "--json")
+
+    assert result.report["failed_scenes"] == ["S0", "T01"]

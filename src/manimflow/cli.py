@@ -16,6 +16,7 @@ from manimflow.continuity import (
     check_continuity,
     extract_frames,
 )
+from manimflow import __version__
 from manimflow.doctor import doctor
 from manimflow.export import PRESETS, export_lesson
 from manimflow.plan import validate_plan
@@ -27,6 +28,7 @@ def main(argv: list[str] | None = None) -> int:
         prog="manimflow", description="Without a command, opens the ManimFlow app in the browser."
     )
     parser.add_argument("--demo", action="store_true", help="answer with the scripted demo agent")
+    parser.add_argument("--version", action="version", version=f"manimflow {__version__}")
     commands = parser.add_subparsers(dest="command")
     for name, help_text in [
         ("preview", "render a scene at low quality"),
@@ -161,10 +163,13 @@ def _resolution(text: str) -> int:
     return value
 
 
+MAX_FPS = 120
+
+
 def _fps(text: str) -> int:
     value = int(text)
-    if not 1 <= value <= 120:
-        raise argparse.ArgumentTypeError("must be from 1 to 120")
+    if not 1 <= value <= MAX_FPS:
+        raise argparse.ArgumentTypeError(f"must be from 1 to {MAX_FPS}")
     return value
 
 
@@ -202,13 +207,15 @@ def _render(lesson: Path, scene: str, mode: str, as_json: bool) -> int:
 def _serve(demo: bool) -> int:
     # NiceGUI is slow to import, and the other commands run inside the agent's loop.
     from manimflow.agent import Agent
-    from manimflow.app import example_copy, serve
+    from manimflow.app import serve
     from manimflow.codex_agent import CodexAgent, default_codex_home
     from manimflow.fake_agent import DEMO, ScriptedAgent
+    from manimflow.home import app_root
+    from manimflow.lessons import Library
     from manimflow.paths import data_dir
 
     agent: Agent = ScriptedAgent(DEMO, delay=0.6) if demo else CodexAgent(default_codex_home())
-    serve(agent, example_copy(data_dir()))
+    serve(agent, app_root(agent, Library(data_dir())))
     return 0
 
 
@@ -221,7 +228,15 @@ def _export(
     background: str | None,
     as_json: bool,
 ) -> int:
-    report = export_lesson(lesson, preset, resolution, fps, aspect_ratio, background)
+    def progress(scene: str | None, number: int, of: int) -> None:
+        # One JSON object per line for a program reading along, such as the export tab.
+        if as_json:
+            line = json.dumps({"progress": {"scene": scene, "number": number, "of": of}})
+        else:
+            line = f"rendering {scene} ({number} of {of})" if scene else "writing the files"
+        print(line, file=sys.stderr, flush=True)
+
+    report = export_lesson(lesson, preset, resolution, fps, aspect_ratio, background, progress)
     details = [report.manim_output] if report.manim_output else []
     return _finish(report, as_json, [str(path) for path in report.files], details)
 

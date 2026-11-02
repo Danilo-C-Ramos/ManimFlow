@@ -1,10 +1,10 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
 name = "manimflow"
-version = "0.0.1"
+dynamic = ["version"]
 description = "Chat-driven Manim animation studio for teachers"
 readme = "README.md"
 license = "MIT"
@@ -15,7 +15,11 @@ dependencies = [
     "manim>=0.22,<0.23",
     "nicegui>=3,<4",
     "openai-codex>=0.162,<0.163",
+    "pygit2>=1.18,<2",
+    # The agent runs each lesson's test_fisica.py with it.
+    "pytest>=8,<10",
     "pyyaml>=6,<7",
+    "ruamel.yaml>=0.19,<0.20",
 ]
 
 [project.scripts]
@@ -24,10 +28,18 @@ manimflow = "manimflow.cli:main"
 [dependency-groups]
 dev = [
     "mypy>=1.13",
-    "pytest>=8",
     "pytest-asyncio>=1",
     "types-pyyaml>=6",
 ]
+
+# The version comes from the git tag: `v0.0.2` builds 0.0.2. Any other commit builds a
+# version with a local part, such as 0.0.3.dev1+g1a2b3c4, which PyPI refuses.
+[tool.hatch.version]
+source = "vcs"
+
+[tool.uv]
+# Rebuild the installed package's metadata when the commit or tag changes its version.
+cache-keys = [{ file = "pyproject.toml" }, { git = { commit = true, tags = true } }]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/manimflow"]
@@ -43,5 +55,5 @@ markers = ["smoke: drives the real Codex agent; needs a signed-in account and sp
 [tool.mypy]
 files = ["src", "tests"]
 # Lesson code belongs to the teacher and is checked by rendering it, not by mypy.
-exclude = ["src/manimflow/exemplos/"]
+exclude = ["src/manimflow/exemplos/", "src/manimflow/modelo/"]
 ignore_missing_imports = true

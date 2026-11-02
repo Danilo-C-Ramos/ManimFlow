@@ -62,3 +62,30 @@ async def test_chatgpt_login_opens_the_browser_on_a_loopback_redirect(tmp_path):
     (url,) = opened
     redirect = urllib.parse.urlparse(urllib.parse.parse_qs(urllib.parse.urlparse(url).query)["redirect_uri"][0])
     assert redirect.hostname == "127.0.0.1"
+
+
+async def test_logout_deletes_the_stored_credentials(tmp_path):
+    home = tmp_path / "codex"
+    agent = CodexAgent(home)
+    try:
+        await agent.login(api_key="sk-teste")
+        await agent.logout()
+        assert await agent.account() == Account(logged_in=False)
+    finally:
+        await agent.close()
+
+    restarted = CodexAgent(home)
+    try:
+        assert await restarted.account() == Account(logged_in=False)
+    finally:
+        await restarted.close()
+
+
+async def test_an_api_key_has_no_plan_quota(tmp_path):
+    agent = CodexAgent(tmp_path / "codex")
+    try:
+        assert await agent.quota() is None
+        await agent.login(api_key="sk-teste")
+        assert await agent.quota() is None
+    finally:
+        await agent.close()
