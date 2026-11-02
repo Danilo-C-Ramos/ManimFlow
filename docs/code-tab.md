@@ -5,7 +5,7 @@ The lesson screen's "Código" tab shows `fisica.py` and `cenas.py` in a CodeMirr
 ## "Renderizar"
 
 1. Every file with unsaved edits is written, keeping the line endings it already had (LF for a new file), then committed as `Edição manual em fisica.py` (or `em fisica.py e cenas.py`). See [versioning](versioning.md).
-2. The scenes the edit affects are previewed, in plan order, through `manimflow preview <lesson> <scene> --json`, the same CLI the agent uses. A change to `fisica.py` can affect any scene, so all of the plan's scenes are rendered. A change to `cenas.py` renders the plan's scenes whose class changed, and those built on a changed class; a change outside the classes (imports, helpers) renders them all. The first scene that fails stops the run, and the tab shows `A cena S2 não renderizou:` followed by the last line of Manim's output, which is the Python error.
+2. The scenes the edit affects are previewed, in plan order, through `manimflow preview <lesson> <scene> --json`, the same CLI the agent uses. A change to `fisica.py` can affect any scene, so all of the plan's scenes are rendered. A change to `cenas.py` renders the plan's scenes whose class changed, and those built on a changed class; a change to any other class or outside the classes (imports, helpers) renders them all. Scenes a failed run didn't reach are rendered with the next one. The first scene that fails stops the run, and the tab shows `A cena S2 não renderizou:` followed by the last line of Manim's output, which is the Python error.
 3. The preview panel picks the new renders up on its own.
 
 When the commit fails (say, a `.git/index.lock` left behind by a crash), the tab says so and still renders: the files are saved, and the next commit picks them up.

@@ -288,3 +288,38 @@ async def test_the_diff_goes_again_when_the_agent_never_got_the_message(tmp_path
         _, retry = agent.received
         (diff,) = retry.attachments.values()
         assert "+VELOCIDADE = 5.0" in diff
+
+
+async def test_an_edit_to_a_helper_class_previews_every_scene(tmp_path):
+    lesson = minimal_lesson(tmp_path)
+    scenes = lesson / "cenas.py"
+    scenes.write_text(scenes.read_text(encoding="utf-8") + "\n\nclass Estilo:\n    LADO = 2\n", encoding="utf-8", newline="\n")
+    async with open_lesson(lesson) as (user, _):
+        user.find("Código").click()
+        user.find("cenas.py").click()
+        edited = editor(user).value.replace("LADO = 2", "LADO = 3")
+        user.find(marker="code").clear().type(edited)
+        user.find("Renderizar").click()
+
+        await user.should_see("Prévia atualizada.", retries=600)
+    assert previewed(lesson) == ["S0", "T01"]
+
+
+async def test_scenes_left_by_a_failed_render_are_previewed_with_the_next_one(tmp_path):
+    lesson = minimal_lesson(tmp_path)
+    async with open_lesson(lesson) as (user, _):
+        user.find("Código").click()
+        user.find("cenas.py").click()
+        original = editor(user).value
+        broken = original.replace("self.add(Square(color=BLUE))", "raise ValueError('quebrada')").replace(
+            "run_time=0.5", "run_time=0.4"
+        )
+        user.find(marker="code").clear().type(broken)
+        user.find("Renderizar").click()
+        await user.should_see("A cena S0 não renderizou:", retries=600)
+
+        user.find(marker="code").clear().type(broken.replace("raise ValueError('quebrada')", "self.add(Square(color=BLUE))"))
+        user.find("Renderizar").click()
+
+        await user.should_see("Prévia atualizada.", retries=600)
+    assert previewed(lesson) == ["S0", "T01"]

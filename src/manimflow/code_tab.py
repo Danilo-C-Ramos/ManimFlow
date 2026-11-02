@@ -39,6 +39,8 @@ class CodeTab:
         # with their new content, until the teacher picks a version.
         self.conflicts: dict[str, str] = {}
         self.rendering = False
+        # Scenes an earlier "Renderizar" had to preview but didn't reach, after a failure.
+        self.pending: set[str] = set()
         self.agent_working = False
         # Shown above the render's progress until the next "Renderizar".
         self.notice: str | None = None
@@ -174,13 +176,16 @@ class CodeTab:
         scenes = list(dict.fromkeys(in_order))
         if PHYSICS_FILE not in before and SCENES_FILE in before:
             changed = _changed_scenes(before[SCENES_FILE], self.saved[SCENES_FILE])
-            if changed is not None:
-                scenes = [scene for scene in scenes if scene in changed]
+            # A changed class that isn't one of the plan's scenes may be a helper any scene uses.
+            if changed is not None and changed <= set(scenes):
+                scenes = [scene for scene in scenes if scene in changed or scene in self.pending]
+        self.pending.update(scenes)
         for number, scene in enumerate(scenes, start=1):
             self._show(f"Renderizando a cena {scene} ({number} de {len(scenes)})…")
             if problem := await run.io_bound(_preview_scene, self.lesson, scene):
                 self._show(f"A cena {scene} não renderizou:", [problem])
                 return
+            self.pending.discard(scene)
         self._show("Prévia atualizada.")
 
     def _show(self, text: str, details: list[str] | tuple[str, ...] = ()) -> None:
