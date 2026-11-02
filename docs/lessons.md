@@ -43,6 +43,10 @@ Then the lesson gets its first version, `Primeira versão da aula` (see `docs/ve
 
 The bundled example (`src/manimflow/exemplos/relatividade`) is never opened in place. The first time it is needed, it is copied, with its own profile, to `exemplo/` in ManimFlow's own folder, and "Abrir o exemplo" opens that copy. The teacher can change the copy freely, and it is kept across launches with its version history and past sessions, like any lesson. The copy is outside the lessons folder, so it never shows among the teacher's lessons, and outside the temp folder, where Codex's Windows sandbox doesn't let the agent in (ADR 0003).
 
+## The lesson list on the lesson screen
+
+The lesson screen has a side column, as in the design's sketch: the teacher's lessons (most recently edited first, the open one in bold), the example below them, "+ Nova aula" and "Perfil do professor". Each entry opens that lesson, so the teacher can switch without going back to "Minhas aulas".
+
 ## Addresses
 
 | Address | Page |

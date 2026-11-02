@@ -69,8 +69,13 @@ def _free_port() -> int:
         return probe.getsockname()[1]
 
 
-def lesson_page(agent: Agent, lesson: Path) -> Callable[[], Awaitable[None]]:
-    """Builds the page for one lesson; each browser tab gets its own agent session."""
+def lesson_page(
+    agent: Agent, lesson: Path, sidebar: Callable[[], object] | None = None
+) -> Callable[[], Awaitable[None]]:
+    """Builds the page for one lesson; each browser tab gets its own agent session.
+
+    `sidebar` draws the side column, such as the list of lessons.
+    """
 
     async def page() -> None:
         ui.page_title(f"{lesson.name} · ManimFlow")
@@ -79,6 +84,9 @@ def lesson_page(agent: Agent, lesson: Path) -> Callable[[], Awaitable[None]]:
             ui.button("Minhas aulas", icon="arrow_back", on_click=lambda: ui.navigate.to("/")).props("flat color=white")
             ui.label(lesson.name).classes("text-lg")
             controls = ui.row().classes("ml-auto items-center")
+        if sidebar is not None:
+            with ui.left_drawer(bordered=True).props("width=220"):
+                sidebar()
         body = ui.column().classes("w-full")
 
         async def open_chat() -> None:

@@ -35,12 +35,12 @@ def app_root(agent: Agent, library: Library) -> Callable[[Request], Awaitable[No
     async def page(request: Request) -> None:
         path = request.url.path
         if path == _EXAMPLE_ROUTE:
-            await lesson_page(agent, example)()
+            await lesson_page(agent, example, lambda: LessonList(library, None))()
             return
         if path.startswith(_LESSON_ROUTE):
             lesson = library.lesson(path.removeprefix(_LESSON_ROUTE))
             if lesson is not None:
-                await lesson_page(agent, lesson)()
+                await lesson_page(agent, lesson, lambda: LessonList(library, lesson.name))()
             else:
                 _not_found("Esta aula não está na pasta das aulas.")
         elif path == "/":
@@ -92,6 +92,31 @@ class Home:
                         "text-lg font-medium text-inherit no-underline after:absolute after:inset-0"
                     )
                     ui.label(_details(lesson)).classes("text-grey-7 text-sm")
+
+
+class LessonList:
+    """The lesson screen's side column: the teacher's lessons, with the open one marked,
+    the example, "+ Nova aula" and the profile. `current` is None for the example."""
+
+    def __init__(self, library: Library, current: str | None) -> None:
+        new_lesson = NewLessonDialog(library)
+        profile_dialog = ProfileDialog(library)
+        with ui.column().classes("w-full gap-1").mark("lesson-list"):
+            ui.label("Aulas").classes("text-lg")
+            for lesson in library.lessons():
+                _entry(lesson.name, lesson_url(lesson.name), lesson.name == current)
+            ui.separator()
+            _entry("Exemplo", _EXAMPLE_ROUTE, current is None)
+        with ui.column().classes("w-full gap-1 mt-4"):
+            ui.button("+ Nova aula", on_click=new_lesson.open).props("flat dense align=left")
+            ui.button("Perfil do professor", icon="tune", on_click=profile_dialog.open).props("flat dense align=left")
+
+
+def _entry(name: str, url: str, current: bool) -> None:
+    if current:
+        ui.label(name).classes("font-bold").mark("current-lesson")
+    else:
+        ui.link(name, url).classes("text-inherit no-underline")
 
 
 class NewLessonDialog:
