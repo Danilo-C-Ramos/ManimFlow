@@ -240,3 +240,32 @@ async def test_renderizar_warns_instead_of_saving_over_a_change_the_editor_has_n
         await user.should_see("fisica.py foi alterado fora do editor enquanto você o editava.")
         assert (lesson / "fisica.py").read_text(encoding="utf-8") == "VELOCIDADE = 2.0\n"
         assert editor(user).value == "VELOCIDADE = 1.0\n# minha nota\n"
+
+
+def previewed(lesson):
+    """The scenes that have a preview image."""
+    return sorted(path.stem for path in (lesson / "saida" / "previa" / "png").glob("*.png"))
+
+
+async def test_renderizar_previews_only_the_scenes_an_edit_to_the_scenes_file_affects(tmp_path):
+    lesson = minimal_lesson(tmp_path)
+    async with open_lesson(lesson) as (user, _):
+        user.find("Código").click()
+        user.find("cenas.py").click()
+        scenes = editor(user).value
+        user.find(marker="code").clear().type(scenes.replace("run_time=0.5", "run_time=0.4"))
+        user.find("Renderizar").click()
+
+        await user.should_see("Prévia atualizada.", retries=600)
+    assert previewed(lesson) == ["T01"]
+
+
+async def test_renderizar_previews_every_scene_after_an_edit_to_the_physics(tmp_path):
+    lesson = minimal_lesson(tmp_path)
+    async with open_lesson(lesson) as (user, _):
+        user.find("Código").click()
+        user.find(marker="code").type("ACELERACAO = 9.8\n")
+        user.find("Renderizar").click()
+
+        await user.should_see("Prévia atualizada.", retries=600)
+    assert previewed(lesson) == ["S0", "T01"]

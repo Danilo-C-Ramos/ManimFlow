@@ -1,10 +1,11 @@
 """The lesson's code tab: the physics and scenes files in an editor the teacher can change.
 
 "Renderizar" saves the teacher's edits, commits them as a manual edit and
-previews every scene of the plan through the `manimflow` CLI. The preview panel
+previews, through the `manimflow` CLI, the scenes of the plan the edits affect. The preview panel
 picks the new renders up on its own.
 """
 
+import ast
 import json
 import logging
 import subprocess
@@ -127,8 +128,9 @@ class CodeTab:
         self.spinner.set_visibility(True)
         self.notice = None
         try:
-            if self._save():
-                await self._preview()
+            before = self._save()
+            if before is not None:
+                await self._preview(before)
         except Exception:
             logger.exception("Preview from the code tab failed")
             self._show("Não foi possível renderizar a prévia agora. Tente de novo.")
@@ -137,9 +139,11 @@ class CodeTab:
             self._update_button()
             self.spinner.set_visibility(False)
 
-    def _save(self) -> bool:
-        """Writes and commits the teacher's edits, returning whether the files were written."""
+    def _save(self) -> dict[str, str] | None:
+        """Writes and commits the teacher's edits, returning each edited file's content
+        before the edit, or None when the files couldn't be written."""
         edited = [name for name in FILES if self.drafts[name] != self.saved[name]]
+        before = {name: self.saved[name] for name in edited}
         for name in edited:
             try:
                 path = self.lesson / name
@@ -149,7 +153,7 @@ class CodeTab:
             except OSError as error:
                 logger.exception("Saving %s failed", name)
                 self._show(f"Não foi possível salvar {name}:", [str(error)])
-                return False
+                return None
             self.saved[name] = self.drafts[name]
         if edited:
             try:
@@ -158,15 +162,20 @@ class CodeTab:
                 # The files are saved; the next commit picks them up.
                 logger.exception("Commit failed")
                 self.notice = "Não foi possível salvar uma versão desta mudança."
-        return True
+        return before
 
-    async def _preview(self) -> None:
+    async def _preview(self, before: dict[str, str]) -> None:
+        """Previews the plan's scenes that the edits from `before` may have changed."""
         plan, errors = load_plan(self.lesson)
         if plan is None:
             self._show("O plano tem problemas, então não dá para saber o que renderizar:", errors)
             return
         in_order = [state.scene for state in plan.states] + [step.scene for step in plan.transitions]
         scenes = list(dict.fromkeys(in_order))
+        if PHYSICS_FILE not in before and SCENES_FILE in before:
+            changed = _changed_scenes(before[SCENES_FILE], self.saved[SCENES_FILE])
+            if changed is not None:
+                scenes = [scene for scene in scenes if scene in changed]
         for number, scene in enumerate(scenes, start=1):
             self._show(f"Renderizando a cena {scene} ({number} de {len(scenes)})…")
             if problem := await run.io_bound(_preview_scene, self.lesson, scene):
@@ -182,6 +191,35 @@ class CodeTab:
             ui.label(text).classes("text-negative" if details else "text-grey-7")
             for detail in details:
                 ui.label(detail).classes("text-negative text-sm font-mono whitespace-pre-wrap")
+
+
+def _changed_scenes(before: str, after: str) -> set[str] | None:
+    """The classes of the scenes file whose code differs between `before` and `after`,
+    with the classes built on them; None when any code outside a class changed, or
+    either version doesn't parse, so every scene may have changed."""
+    try:
+        old, new = ast.parse(before), ast.parse(after)
+    except SyntaxError:
+        return None
+
+    def split(module: ast.Module) -> tuple[dict[str, str], list[str]]:
+        # Dumped without positions, so code that only moved isn't a change.
+        classes = {node.name: ast.dump(node) for node in module.body if isinstance(node, ast.ClassDef)}
+        rest = [ast.dump(node) for node in module.body if not isinstance(node, ast.ClassDef)]
+        return classes, rest
+
+    (old_classes, old_rest), (new_classes, new_rest) = split(old), split(new)
+    if old_rest != new_rest:
+        return None
+    changed = {name for name in old_classes.keys() | new_classes.keys() if old_classes.get(name) != new_classes.get(name)}
+    bases = {
+        node.name: {base.id for base in node.bases if isinstance(base, ast.Name)}
+        for node in new.body
+        if isinstance(node, ast.ClassDef)
+    }
+    while grown := {name for name, parents in bases.items() if parents & changed} - changed:
+        changed |= grown
+    return changed
 
 
 def _preview_scene(lesson: Path, scene: str) -> str | None:
