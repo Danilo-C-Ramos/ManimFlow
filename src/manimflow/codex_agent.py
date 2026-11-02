@@ -83,6 +83,8 @@ from manimflow.agent import (
     ModelSettings,
     PastSession,
     QuotaWindow,
+    teachers_words,
+    with_attachments,
 )
 from manimflow.model_presets import DEFAULT
 
@@ -216,7 +218,7 @@ class CodexAgent:
             )
             # A thread's preview is its first message; a thread without one never got a request.
             sessions += [
-                PastSession(thread.id, datetime.fromtimestamp(thread.created_at), thread.preview)
+                PastSession(thread.id, datetime.fromtimestamp(thread.created_at, UTC), teachers_words(thread.preview))
                 for thread in page.data
                 if thread.preview
             ]
@@ -233,7 +235,7 @@ class CodexAgent:
                 match item.root:
                     case UserMessageThreadItem(content=content):
                         text = "\n\n".join(part.root.text for part in content if isinstance(part.root, TextUserInput))
-                        messages.append(Message("teacher", text))
+                        messages.append(Message("teacher", teachers_words(text)))
                     case AgentMessageThreadItem(text=text):
                         messages.append(Message("agent", text))
         return messages
@@ -377,10 +379,7 @@ class CodexSession:
             yield AgentError(problem, delivered=False)
             return
         settings = await self._agent.model_settings()
-        parts = [text] + [
-            f"Anexo {path.name}:\n\n{path.read_text(encoding='utf-8')}" for path in attachments
-        ]
-        message: list[InputItem] = [TextInput("\n\n".join(parts))]
+        message: list[InputItem] = [TextInput(with_attachments(text, attachments))]
         if not self._started:
             # Codex puts the skill's text into the thread itself, so the agent has it
             # without reading the file, and later turns keep it in the history.

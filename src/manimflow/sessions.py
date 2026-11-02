@@ -81,4 +81,5 @@ class SessionHistory:
 
 
 def _when(moment: datetime) -> str:
-    return moment.strftime("%d/%m/%Y %H:%M")
+    """The moment in the teacher's own time zone."""
+    return moment.astimezone().strftime("%d/%m/%Y %H:%M")

@@ -144,3 +144,22 @@ async def test_sessions_belong_to_their_lesson(tmp_path):
         await user.open("/")
 
         assert await past_sessions(user) == [["27/10/2026 14:30", "desenha a onda"]]
+
+
+async def test_a_past_session_shows_the_teachers_words_without_the_manual_edits(tmp_path):
+    (tmp_path / "fisica.py").write_text("g = 9.8\n", encoding="utf-8")
+    agent = ScriptedAgent([[AssistantText("Usei o seu g.")]])
+    async with lesson_screen(agent, tmp_path) as user:
+        await user.open("/")
+        (tmp_path / "fisica.py").write_text("g = 9.81\n", encoding="utf-8")
+        send(user, "use o meu g")
+        await user.should_see("Usei o seu g.", retries=100)
+        assert agent.received[0].attachments
+
+        await user.open("/")
+        (entry,) = await past_sessions(user)
+        assert entry[1] == "use o meu g"
+
+        user.find(marker="past-session").click()
+        await user.should_see(marker="past-messages")
+        assert texts(user, "past-messages") == ["use o meu g", "Usei o seu g."]

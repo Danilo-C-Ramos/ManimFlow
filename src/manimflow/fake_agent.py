@@ -27,6 +27,8 @@ from manimflow.agent import (
     ModelSettings,
     PastSession,
     QuotaWindow,
+    teachers_words,
+    with_attachments,
 )
 from manimflow.model_presets import DEFAULT
 
@@ -80,7 +82,7 @@ class ScriptedAgent:
         delay: float = 0.0,
         logged_in: bool = True,
         login_failure: str | None = None,
-        clock: Callable[[], datetime] = datetime.now,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self.scenario = scenario
         # Seconds between steps, so the demo streams at a visible pace.
@@ -116,14 +118,17 @@ class ScriptedAgent:
 
     async def past_sessions(self, lesson: Path) -> list[PastSession]:
         return [
-            PastSession(session.id, session.started_at, session.messages[0].text)
+            PastSession(session.id, session.started_at, teachers_words(session.messages[0].text))
             for session in reversed(self._sessions)
             if session.lesson.resolve() == lesson.resolve() and session.messages
         ]
 
     async def session_messages(self, session_id: str) -> list[Message]:
         (session,) = [session for session in self._sessions if session.id == session_id]
-        return list(session.messages)
+        return [
+            Message(message.author, teachers_words(message.text)) if message.author == "teacher" else message
+            for message in session.messages
+        ]
 
     async def account(self) -> Account:
         return self._account
@@ -175,7 +180,8 @@ class ScriptedSession:
 
     async def send(self, text: str, attachments: Sequence[Path] = ()) -> AsyncIterator[Event]:
         self._on_turn()
-        self.messages.append(Message("teacher", text))
+        # Kept as Codex keeps it: the attachments join the text.
+        self.messages.append(Message("teacher", with_attachments(text, attachments)))
         # Read now, as the Codex adapter does, since the files may change after the message.
         self._received.append(Received(text, {path.name: path.read_text(encoding="utf-8") for path in attachments}))
         turn = next(self._turns, None)

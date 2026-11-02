@@ -439,3 +439,22 @@ async def test_the_windows_sandbox_prefers_elevated_and_falls_back_without_admin
     assert sandbox.setups == setups
     # One command through the sandbox, which starts Codex's read grants for the teacher's folders.
     assert [command["cwd"] for command in sandbox.commands] == [str(tmp_path)]
+
+
+async def test_past_sessions_show_the_teachers_words_without_the_attachments(codex_agent, mock_model, lesson, tmp_path):
+    edits = tmp_path / "edicoes-manuais.diff"
+    edits.write_text("-COR_LUZ = AMARELO\n+COR_LUZ = VERMELHO\n", encoding="utf-8")
+    mock_model.reply(message("Mantive o vermelho."))
+    session = await codex_agent.start_session(lesson)
+    await turn(session, "renderiza de novo", [edits])
+    await codex_agent.start_session(lesson)
+
+    (past,) = await codex_agent.past_sessions(lesson)
+
+    assert past.first_request == "renderiza de novo"
+    assert await codex_agent.session_messages(session.id) == [
+        Message("teacher", "renderiza de novo"),
+        Message("agent", "Mantive o vermelho."),
+    ]
+    # An aware time, as the app compares and shows it in the teacher's time zone.
+    assert past.started_at.tzinfo is not None

@@ -113,9 +113,28 @@ class Message:
     text: str
 
 
+# Between the teacher's words and each attachment, in the one text an engine gets.
+_ATTACHMENT = "\n\n----- Anexo {name} -----\n\n"
+
+
+def with_attachments(text: str, attachments: Sequence[Path]) -> str:
+    """The teacher's message and each attachment's content, as one text for the agent.
+
+    Read now, since the files may change after the message.
+    """
+    return text + "".join(
+        _ATTACHMENT.format(name=path.name) + path.read_text(encoding="utf-8") for path in attachments
+    )
+
+
+def teachers_words(message: str) -> str:
+    """A message made by `with_attachments`, without the attachments."""
+    return message.split(_ATTACHMENT.split("{")[0], 1)[0]
+
+
 @dataclass(frozen=True)
 class PastSession:
-    """A lesson's earlier conversation, as the session list shows it."""
+    """A lesson's earlier conversation, as the session list shows it; `started_at` is aware."""
 
     id: str
     started_at: datetime
