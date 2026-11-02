@@ -6,6 +6,7 @@ import logging
 import os
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -60,7 +61,9 @@ class ExportPanel:
                 ui.spinner(size="sm")
                 self.progress = ui.label()
             self.working.set_visibility(False)
-            self.result = ui.column().classes("w-full gap-1")
+            self.result = ui.column().classes("w-full gap-1").mark("export-result")
+        # The CLI's last word on its progress, from the thread that reads it.
+        self.step: dict | None = None
         self._use_defaults()
 
     async def run(self) -> None:
@@ -70,6 +73,7 @@ class ExportPanel:
         folder = self.lesson / OUTPUT_DIR / self.preset.value
         self._set_busy(True)
         self.result.clear()
+        self.step = None
         started = time.monotonic()
         ticker = ui.timer(1, lambda: self._show_progress(time.monotonic() - started))
         self._show_progress(0)
@@ -88,23 +92,40 @@ class ExportPanel:
         """Runs the CLI and returns its JSON report, or a report of why there is none."""
         try:
             # In a thread: NiceGUI's event loop may not run subprocesses on Windows.
-            finished = await asyncio.to_thread(
-                subprocess.run,
-                self._command(),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-            )
+            return await asyncio.to_thread(self._run_cli)
         except Exception as error:
             logger.exception("Could not start the export")
             return {"ok": False, "errors": [str(error)]}
+
+    def _run_cli(self) -> dict:
+        """Runs the CLI, keeping its progress lines in `step` as they come."""
+        with subprocess.Popen(
+            self._command(),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        ) as process:
+            assert process.stdout is not None and process.stderr is not None
+            stdout = process.stdout
+            report: list[str] = []
+            # Read apart, so a long report never blocks the CLI while stderr is read.
+            reader = threading.Thread(target=lambda: report.append(stdout.read()))
+            reader.start()
+            other = []
+            for line in process.stderr:
+                try:
+                    self.step = json.loads(line)["progress"]
+                except (ValueError, KeyError, TypeError):
+                    other.append(line)
+            reader.join()
         try:
-            return json.loads(finished.stdout)
+            return json.loads(report[0])
         except ValueError:
             # The CLI stopped before writing its report, so its own words are on stderr.
-            logger.error("Export ended without a report: %s", finished.stderr)
-            return {"ok": False, "errors": finished.stderr.strip().splitlines()[-1:]}
+            logger.error("Export ended without a report: %s", "".join(other))
+            return {"ok": False, "errors": "".join(other).strip().splitlines()[-1:]}
 
     def _command(self) -> list[str]:
         command = [sys.executable, "-m", "manimflow.cli", "export", str(self.lesson), self.preset.value]
@@ -115,7 +136,14 @@ class ExportPanel:
         return [*command, "--json"]
 
     def _show_progress(self, elapsed: float) -> None:
-        self.progress.set_text(f"Exportando… {int(elapsed)} s. Pode levar alguns minutos.")
+        step = self.step
+        if step is None:
+            doing = "Exportando…"
+        elif step["scene"] is None:
+            doing = "Gravando os arquivos…"
+        else:
+            doing = f"Renderizando a cena {step['scene']} ({step['number']} de {step['of']})…"
+        self.progress.set_text(f"{doing} {int(elapsed)} s. Pode levar alguns minutos.")
 
     def _set_busy(self, busy: bool) -> None:
         for control in (self.preset, self.resolution, self.fps, self.aspect_ratio, self.background):
@@ -188,12 +216,18 @@ def open_in_file_manager(folder: Path) -> None:
 
 def _show_failure(report: dict) -> None:
     """What went wrong: the CLI's own messages are in Portuguese for problems in the plan
-    and the scenes, and in English, meant for the agent, for a scene that fails to render."""
+    and the scenes. For a scene that fails to render they are in English, meant for the
+    agent, so they wait in the details."""
     ui.label("A exportação falhou, e nenhum arquivo foi alterado.").classes("text-negative")
-    if report.get("manim_output"):
-        ui.label("Uma cena deu erro ao renderizar. Peça ao agente para corrigir.")
+    failed = report.get("failed_scenes") or []
+    for scene in failed:
+        ui.label(f"A cena {scene} deu erro ao renderizar.").classes("text-negative text-sm")
+    if failed:
+        ui.label("Peça ao agente para corrigir.")
+        with ui.expansion("Detalhes para o agente").classes("w-full"):
+            for error in report.get("errors", []):
+                ui.label(error).classes("font-mono text-xs")
+            ui.label(report.get("manim_output", "")).classes("font-mono text-xs whitespace-pre-wrap")
+        return
     for error in report.get("errors", []):
         ui.label(error).classes("text-negative text-sm")
-    if report.get("manim_output"):
-        with ui.expansion("Saída do Manim").classes("w-full"):
-            ui.label(report["manim_output"]).classes("font-mono text-xs whitespace-pre-wrap")

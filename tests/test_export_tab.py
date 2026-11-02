@@ -78,6 +78,7 @@ async def test_runs_the_cli_with_the_chosen_preset_and_settings_and_lists_the_fi
         user.find(marker="run-export").click()
 
         await user.should_see("Exportando…")
+        await user.should_see("Renderizando a cena", retries=600)
         await user.should_see("Arquivos exportados", retries=600)
         assert exported(user) == ["01_S0.png", "02_S0-S1.mp4", "03_S1.png"]
 
@@ -92,6 +93,23 @@ async def test_runs_the_cli_with_the_chosen_preset_and_settings_and_lists_the_fi
         assert len(list(video.decode(video=0))) == 5
 
 
+def failure(user):
+    """What the tab says about a failed export, outside its collapsed details."""
+    with user:
+        (result,) = user.find(marker="export-result").elements
+        details = {
+            id(element)
+            for expansion in result.descendants()
+            if isinstance(expansion, ui.expansion)
+            for element in expansion.descendants()
+        }
+        return [
+            element.text
+            for element in result.descendants()
+            if isinstance(element, ui.label) and id(element) not in details
+        ]
+
+
 async def test_a_scene_that_fails_is_reported_in_portuguese_and_the_tab_recovers(lesson):
     scenes = lesson / "cenas.py"
     scenes.write_text(scenes.read_text(encoding="utf-8") + "\nraise ValueError('quebrada')\n", encoding="utf-8", newline="\n")
@@ -101,7 +119,13 @@ async def test_a_scene_that_fails_is_reported_in_portuguese_and_the_tab_recovers
         user.find(marker="run-export").click()
 
         await user.should_see("A exportação falhou", retries=600)
-        await user.should_see("Uma cena deu erro ao renderizar. Peça ao agente para corrigir.")
+        assert failure(user) == [
+            "A exportação falhou, e nenhum arquivo foi alterado.",
+            "A cena S0 deu erro ao renderizar.",
+            "A cena T01 deu erro ao renderizar.",
+            "Peça ao agente para corrigir.",
+        ]
+        # Manim's own words, in English, wait in the details for the agent.
         await user.should_see("quebrada")
         await user.should_not_see("Arquivos exportados")
         with user:

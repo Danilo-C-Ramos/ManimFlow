@@ -228,7 +228,15 @@ def _export(
     background: str | None,
     as_json: bool,
 ) -> int:
-    report = export_lesson(lesson, preset, resolution, fps, aspect_ratio, background)
+    def progress(scene: str | None, number: int, of: int) -> None:
+        # One JSON object per line for a program reading along, such as the export tab.
+        if as_json:
+            line = json.dumps({"progress": {"scene": scene, "number": number, "of": of}})
+        else:
+            line = f"rendering {scene} ({number} of {of})" if scene else "writing the files"
+        print(line, file=sys.stderr, flush=True)
+
+    report = export_lesson(lesson, preset, resolution, fps, aspect_ratio, background, progress)
     details = [report.manim_output] if report.manim_output else []
     return _finish(report, as_json, [str(path) for path in report.files], details)
 

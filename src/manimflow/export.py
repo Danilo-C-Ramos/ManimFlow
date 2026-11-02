@@ -59,6 +59,10 @@ class Settings:
         }
 
 
+# Told of the scene about to render, its number and how many there are; no scene for the files.
+Progress = Callable[[str | None, int, int], None]
+
+
 @dataclass
 class ExportReport:
     lesson: Path
@@ -68,6 +72,7 @@ class ExportReport:
     duration_s: float = 0.0
     errors: list[str] = field(default_factory=list)
     manim_output: str = ""
+    failed_scenes: list[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -84,6 +89,7 @@ class ExportReport:
             "duration_s": round(self.duration_s, 3),
             "errors": self.errors,
             "manim_output": self.manim_output,
+            "failed_scenes": self.failed_scenes,
         }
 
 
@@ -94,10 +100,14 @@ def export_lesson(
     fps: int | None = None,
     aspect_ratio: tuple[int, int] | None = None,
     background: str | None = None,
+    on_progress: Progress = lambda scene, number, of: None,
 ) -> ExportReport:
     """Renders the lesson at final quality and writes the preset's files, in plan order, to
     the preset's folder in the lesson's output folder. Settings left as None keep the preset's;
-    `background` is a "#rrggbb" color."""
+    `background` is a "#rrggbb" color.
+
+    `on_progress` is told of each scene before it renders, as its number of all the scenes
+    to render, and then with no scene when the files are written."""
     started = time.perf_counter()
     chosen = PRESETS[preset]
     settings = Settings(
@@ -110,12 +120,12 @@ def export_lesson(
     if chosen.max_fps and settings.fps > chosen.max_fps:
         report.errors.append(f"The {preset} preset plays at most {chosen.max_fps} fps, not {settings.fps}")
     else:
-        _export_into(report)
+        _export_into(report, on_progress)
     report.duration_s = time.perf_counter() - started
     return report
 
 
-def _export_into(report: ExportReport) -> None:
+def _export_into(report: ExportReport, on_progress: Progress) -> None:
     plan, report.errors = load_plan(report.lesson)
     if plan is None:
         return
@@ -130,15 +140,19 @@ def _export_into(report: ExportReport) -> None:
         needed = [slide for slide in slides if not (preset.gif and _reached_by_previous(slide, slides))]
         # GIFs are made from exact frames; Manim only writes those for scenes that animate.
         lossless = {slide.scene for slide in needed if preset.gif and isinstance(slide, Transition)}
-        for scene in dict.fromkeys(slide.scene for slide in needed):
+        scenes = list(dict.fromkeys(slide.scene for slide in needed))
+        for number, scene in enumerate(scenes, start=1):
+            on_progress(scene, number, len(scenes))
             settings = report.settings.for_worker(lossless=scene in lossless)
             worker = run_worker(report.lesson, scene, FINAL_QUALITY, renders, settings)
             if not worker.ok:
                 report.manim_output += worker.output
                 report.errors.append(worker.error)
+                report.failed_scenes.append(scene)
         if report.errors:
             return
 
+        on_progress(None, len(scenes), len(scenes))
         preset.write(slides, renders, exported, report)
         if report.errors:
             return
