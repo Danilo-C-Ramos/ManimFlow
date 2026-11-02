@@ -57,7 +57,6 @@ class Library:
         """`data` is ManimFlow's own folder: the choice of lessons folder and the
         example's copy are kept there."""
         self.data = data
-        self._example: Path | None = None
 
     @property
     def folder(self) -> Path:
@@ -141,19 +140,24 @@ class Library:
     def example(self) -> Path:
         """The copy of the bundled example the teacher opens, so the original stays pristine.
 
-        Made fresh the first time each Library is asked, which is once per launch.
-        It lives in ManimFlow's folder, not in the lessons folder, so it never mixes
-        with the teacher's lessons, and not in the temp folder, where Codex's Windows
-        sandbox never lets the agent in.
+        Made the first time it is needed, then kept, with the teacher's changes and their
+        history, as any lesson is. It lives in ManimFlow's folder, not in the lessons
+        folder, so it never mixes with the teacher's lessons, and not in the temp folder,
+        where Codex's Windows sandbox never lets the agent in.
         """
-        if self._example is None:
-            examples = self.data / "exemplo"
-            shutil.rmtree(examples, ignore_errors=True)
-            examples.mkdir(parents=True)
+        examples = self.data / "exemplo"
+        example = examples / EXAMPLE_NAME
+        if not (examples / PROFILE_FILE).is_file() or not _is_lesson(example):
+            # Copied aside and then moved in, so a copy cut short is never taken for the example.
+            staging = self.data / "exemplo.novo"
+            shutil.rmtree(staging, ignore_errors=True)
+            staging.mkdir(parents=True)
             # Its own profile, which the bundled CONTEXTO.md relies on.
-            shutil.copy(_DEFAULT_PROFILE, examples)
-            self._example = Path(shutil.copytree(_EXAMPLES / "relatividade", examples / EXAMPLE_NAME))
-        return self._example
+            shutil.copy(_DEFAULT_PROFILE, staging)
+            shutil.copytree(_EXAMPLES / "relatividade", staging / EXAMPLE_NAME)
+            shutil.rmtree(examples, ignore_errors=True)
+            staging.rename(examples)
+        return example
 
     def _config(self) -> dict:
         try:

@@ -10,6 +10,7 @@ import pytest
 from nicegui import ui
 from nicegui.testing.user_simulation import user_simulation
 
+from manimflow.agent import AssistantText
 from manimflow.fake_agent import EditFile, ScriptedAgent
 from manimflow.home import app_root
 from manimflow.lessons import Library
@@ -302,3 +303,24 @@ async def test_a_lesson_with_a_percent_sign_in_its_name_opens(library):
         create_lesson(user, "100%eficiente")
         await user.should_see(marker="message")
         await user.should_see("100%eficiente")
+
+
+async def test_the_teachers_changes_to_the_example_and_its_history_outlive_a_relaunch(library):
+    scenario = [[EditFile("cenas.py", "# mudado\n"), AssistantText("Mudei.")]]
+    async with open_home(library, scenario) as user:
+        user.find("Abrir o exemplo").click()
+        await user.should_see(marker="message")
+        user.find(marker="message").type("muda tudo")
+        user.find("Enviar").click()
+        await user.should_see("Mudei.", retries=100)
+        await user.should_not_see("O agente está trabalhando…", retries=100)
+
+    # A new launch gets a new Library on the same folder.
+    relaunched = Library(library.data)
+    async with open_home(relaunched) as user:
+        user.find("Abrir o exemplo").click()
+        await user.should_see(marker="message")
+    example = relaunched.example()
+    assert (example / "cenas.py").read_text(encoding="utf-8") == "# mudado\n"
+    repo = pygit2.Repository(str(example / ".git"))
+    assert repo[repo.head.target].message == "Pedido: muda tudo"
