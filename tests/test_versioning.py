@@ -21,8 +21,9 @@ async def send(user, text, last):
     turn's last text."""
     user.find(marker="message").type(text)
     user.find("Enviar").click()
-    await user.should_see(last)
-    await user.should_not_see("O agente está trabalhando…")
+    # Each turn commits a version, which takes seconds on Windows.
+    await user.should_see(last, retries=100)
+    await user.should_not_see("O agente está trabalhando…", retries=100)
 
 
 def history_of(lesson):

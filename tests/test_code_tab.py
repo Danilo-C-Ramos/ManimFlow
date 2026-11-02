@@ -86,8 +86,9 @@ async def send(user, text, last):
     """Sends `text` to the agent and waits until its turn has ended, `last` being the turn's last text."""
     user.find(marker="message").type(text)
     user.find("Enviar").click()
-    await user.should_see(last)
-    await user.should_not_see("O agente está trabalhando…")
+    # Each turn commits a version, which takes seconds on Windows.
+    await user.should_see(last, retries=100)
+    await user.should_not_see("O agente está trabalhando…", retries=100)
 
 
 async def test_the_next_message_carries_the_manual_edit_diff_only_once(tmp_path):

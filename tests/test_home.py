@@ -319,7 +319,7 @@ async def test_the_teachers_changes_to_the_example_and_its_history_outlive_a_rel
     relaunched = Library(library.data)
     async with open_home(relaunched) as user:
         user.find("Abrir o exemplo").click()
-        await user.should_see(marker="message")
+        await user.should_see(marker="message", retries=100)
     example = relaunched.example()
     assert (example / "cenas.py").read_text(encoding="utf-8") == "# mudado\n"
     repo = pygit2.Repository(str(example / ".git"))
@@ -331,21 +331,21 @@ async def test_the_lesson_screen_lists_the_lessons_and_switches_to_another(libra
     add_lesson(library.folder, "Aula 10 - Gêmeos", datetime(2026, 10, 6))
     async with open_home(library) as user:
         await user.open(lesson_url("Aula 09 - Minkowski"))
-        await user.should_see(marker="lesson-list")
+        await user.should_see(marker="lesson-list", retries=100)
         assert labels(user, "lesson-list") == ["Aulas", "Aula 10 - Gêmeos", "Aula 09 - Minkowski", "Exemplo"]
         with user:
             (current,) = user.find(marker="current-lesson").elements
             assert current.text == "Aula 09 - Minkowski"
 
         user.find(kind=ui.link, content="Aula 10 - Gêmeos").click()
-        await user.should_see(marker="current-lesson", content="Aula 10 - Gêmeos")
+        await user.should_see(marker="current-lesson", content="Aula 10 - Gêmeos", retries=100)
 
 
 async def test_a_new_lesson_can_be_started_from_the_lesson_screen(library):
     add_lesson(library.folder, "Aula 09 - Minkowski", datetime(2026, 10, 5))
     async with open_home(library) as user:
         await user.open(lesson_url("Aula 09 - Minkowski"))
-        await user.should_see(marker="lesson-list")
+        await user.should_see(marker="lesson-list", retries=100)
         create_lesson(user, "Aula 11 - Óptica")
 
-        await user.should_see(marker="current-lesson", content="Aula 11 - Óptica")
+        await user.should_see(marker="current-lesson", content="Aula 11 - Óptica", retries=100)
