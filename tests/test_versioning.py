@@ -6,7 +6,6 @@ from nicegui.testing.user_simulation import user_simulation
 from manimflow.agent import AssistantText
 from manimflow.app import lesson_page
 from manimflow.fake_agent import EditFile, Produce, ScriptedAgent
-from manimflow.versioning import History
 
 
 @asynccontextmanager
@@ -193,24 +192,26 @@ async def test_a_failed_commit_is_reported_and_the_chat_recovers(tmp_path):
     assert files_in(latest) == {"cenas.py": "COR = AMARELO\n"}
 
 
-# The diff of manual edits goes to the agent with the teacher's next message
-# (ticket #12), so it is tested at the module's own interface.
-
-
-def test_manual_changes_hold_the_teachers_edits_since_the_agents_last_turn(tmp_path):
+async def test_the_next_message_carries_the_teachers_edits_since_the_agents_last_turn(tmp_path):
     # LF on every platform, so the blob ids in the expected diff hold on Windows too.
     (tmp_path / "fisica.py").write_text("g = 9.8\nm = 2\n", encoding="utf-8", newline="\n")
     (tmp_path / "cenas.py").write_text("COR = AZUL\n", encoding="utf-8", newline="\n")
-    history = History.open(tmp_path)
-    (tmp_path / "cenas.py").write_text("COR = VERDE\n", encoding="utf-8", newline="\n")
-    history.commit_agent_turn("luz verde")
+    scenario = [[EditFile("cenas.py", "COR = VERDE\n"), AssistantText("Verde.")], [AssistantText("Vi.")]]
+    agent = ScriptedAgent(scenario)
+    async with user_simulation(root=lesson_page(agent, tmp_path)) as user:
+        await user.open("/")
+        await send(user, "luz verde", last="Verde.")
 
-    (tmp_path / "fisica.py").write_text("g = 9.81\nm = 2\n", encoding="utf-8", newline="\n")
-    history.commit_manual_edit("Edição manual em fisica.py")
-    (tmp_path / "notas.md").write_text("Conferir g.\n", encoding="utf-8", newline="\n")
+        # The teacher fixes the physics and takes a note in their own editor.
+        (tmp_path / "fisica.py").write_text("g = 9.81\nm = 2\n", encoding="utf-8", newline="\n")
+        (tmp_path / "notas.md").write_text("Conferir g.\n", encoding="utf-8", newline="\n")
+        await send(user, "confira", last="Vi.")
 
-    assert history.manual_changes() == (
-        "diff --git a/fisica.py b/fisica.py\n"
+    first, second = agent.received
+    assert first.attachments == {}
+    # The agent's own change to cenas.py is not in it.
+    assert second.attachments == {
+        "edicoes-manuais.diff": "diff --git a/fisica.py b/fisica.py\n"
         "index 8ae8599..b21e809 100644\n"
         "--- a/fisica.py\n"
         "+++ b/fisica.py\n"
@@ -225,30 +226,29 @@ def test_manual_changes_hold_the_teachers_edits_since_the_agents_last_turn(tmp_p
         "+++ b/notas.md\n"
         "@@ -0,0 +1 @@\n"
         "+Conferir g.\n"
-    )
+    }
 
 
-def test_manual_changes_are_empty_after_any_agent_turn(tmp_path):
+async def test_a_turn_that_changes_nothing_still_takes_the_edits_with_it(tmp_path):
     (tmp_path / "fisica.py").write_text("g = 9.8\n", encoding="utf-8")
-    history = History.open(tmp_path)
-    assert history.manual_changes() == ""
+    agent = ScriptedAgent([[AssistantText("Conferi.")], [AssistantText("Pronto.")]])
+    async with user_simulation(root=lesson_page(agent, tmp_path)) as user:
+        await user.open("/")
+        (tmp_path / "fisica.py").write_text("g = 9.81\n", encoding="utf-8")
+        await send(user, "confere a física", last="Conferi.")
+        await send(user, "agora a cor", last="Pronto.")
 
-    (tmp_path / "fisica.py").write_text("g = 9.81\n", encoding="utf-8")
-    history.commit_manual_edit("Edição manual em fisica.py")
-    assert history.manual_changes() != ""
-
-    # A turn that changes nothing still received the edits with its message.
-    assert history.commit_agent_turn("confere a física") is None
-    assert history.manual_changes() == ""
+    first, second = agent.received
+    assert first.attachments
+    assert second.attachments == {}
 
 
-def test_a_deleted_file_leaves_the_next_version(tmp_path):
+async def test_a_deleted_file_leaves_the_next_version(tmp_path):
     (tmp_path / "fisica.py").write_text("g = 9.8\n", encoding="utf-8")
     (tmp_path / "rascunho.py").write_text("x = 1\n", encoding="utf-8")
-    history = History.open(tmp_path)
+    async with open_lesson(tmp_path, [[AssistantText("Ok.")]]) as user:
+        (tmp_path / "rascunho.py").unlink()
+        await send(user, "segue", last="Ok.")
+        latest, _ = history_of(tmp_path)
 
-    (tmp_path / "rascunho.py").unlink()
-    history.commit_agent_turn("apaga o rascunho")
-
-    latest, _ = history_of(tmp_path)
     assert files_in(latest) == {"fisica.py": "g = 9.8\n"}
