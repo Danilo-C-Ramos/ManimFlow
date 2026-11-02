@@ -6,7 +6,7 @@ import pygit2
 from nicegui import ui
 from nicegui.testing.user_simulation import user_simulation
 
-from manimflow.agent import AssistantText
+from manimflow.agent import AgentError, AssistantText
 from manimflow.app import lesson_page
 from manimflow.fake_agent import EditFile, ScriptedAgent
 
@@ -269,3 +269,21 @@ async def test_renderizar_previews_every_scene_after_an_edit_to_the_physics(tmp_
 
         await user.should_see("Prévia atualizada.", retries=600)
     assert previewed(lesson) == ["S0", "T01"]
+
+
+async def test_the_diff_goes_again_when_the_agent_never_got_the_message(tmp_path):
+    lesson = minimal_lesson(tmp_path)
+    scenario = [
+        # As Codex does when its sandbox can't start.
+        [AgentError("O agente não consegue rodar comandos.", delivered=False)],
+        [AssistantText("Vi a sua correção.")],
+    ]
+    async with open_lesson(lesson, scenario) as (user, agent):
+        (lesson / "fisica.py").write_text("VELOCIDADE = 5.0\n", encoding="utf-8", newline="\n")
+
+        await send(user, "use a minha velocidade", "O agente não consegue rodar comandos.")
+        await send(user, "tente de novo", "Vi a sua correção.")
+
+        _, retry = agent.received
+        (diff,) = retry.attachments.values()
+        assert "+VELOCIDADE = 5.0" in diff

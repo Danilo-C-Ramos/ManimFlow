@@ -374,7 +374,7 @@ class CodexSession:
         # Every command would fail inside a sandbox that can't start, so the turn
         # would only spend quota.
         if problem := await self._agent.sandbox_problem():
-            yield AgentError(problem)
+            yield AgentError(problem, delivered=False)
             return
         settings = await self._agent.model_settings()
         parts = [text] + [

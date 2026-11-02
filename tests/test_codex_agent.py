@@ -354,7 +354,7 @@ async def test_a_sandbox_that_cant_start_stops_the_turn_before_the_model(codex_h
     finally:
         await agent.close()
 
-    assert events == [AgentError("O Ubuntu bloqueia o isolamento.")]
+    assert events == [AgentError("O Ubuntu bloqueia o isolamento.", delivered=False)]
     assert mock_model.requests == []
 
 

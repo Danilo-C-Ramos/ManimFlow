@@ -226,10 +226,11 @@ class Chat:
             ui.label(text).classes("whitespace-pre-wrap")
         # So the agent's commit holds only what the agent changed.
         self._save_version(lambda: self.history.commit_manual_edit(OUTSIDE_EDITS))
-        ok = True
+        ok = delivered = True
         try:
             async for event in self.session.send(text, self._manual_edits()):
                 ok = ok and not isinstance(event, AgentError)
+                delivered = delivered and not (isinstance(event, AgentError) and not event.delivered)
                 with self.conversation:
                     self._show(event)
                 self.scroll.scroll_to(percent=1)
@@ -240,8 +241,10 @@ class Chat:
                 _error_row("O agente parou por um erro inesperado.")
             ok = False
         finally:
-            # Even a failed turn may have changed files, and they must not be lost.
-            self._save_version(lambda: self.history.commit_agent_turn(text))
+            # Even a failed turn may have changed files, and they must not be lost. A message
+            # the agent never got leaves the manual edits for the next one.
+            if delivered:
+                self._save_version(lambda: self.history.commit_agent_turn(text))
             self._set_busy(False)
         return ok
 

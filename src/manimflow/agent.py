@@ -55,9 +55,14 @@ class ImageViewed:
 
 @dataclass(frozen=True)
 class AgentError:
-    """The turn failed; `message` explains why, for the teacher."""
+    """The turn failed; `message` explains why, for the teacher.
+
+    `delivered` is False when the message never reached the agent, so it handled
+    nothing of it, attachments included.
+    """
 
     message: str
+    delivered: bool = True
 
 
 Event = AssistantText | CommandStarted | CommandFinished | FileChanged | ImageViewed | AgentError
