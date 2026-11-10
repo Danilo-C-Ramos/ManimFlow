@@ -78,8 +78,11 @@ The command exits non-zero when the plan is invalid, a scene fails, or a transit
   ],
   "duration_s": 41.2,
   "errors": [],
-  "manim_output": ""
+  "manim_output": "",
+  "failed_scenes": []
 }
 ```
 
-`manim_output` holds the output of every scene that failed, as in the `render` report.
+`manim_output` holds the output of every scene that failed, as in the `render` report, and `failed_scenes` names those scenes.
+
+While it runs, the command reports its progress on stderr, one line per scene it is about to render and one when it writes the files. With `--json`, each line is a JSON object, `{"progress": {"scene": "S0", "number": 1, "of": 3}}`, with `"scene": null` for the files. The export tab reads these lines and shows `Renderizando a cena S0 (1 de 3)…`. When a scene fails, the tab names it in Portuguese and keeps the English errors and Manim's output under "Detalhes para o agente".

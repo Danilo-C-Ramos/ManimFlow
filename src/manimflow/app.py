@@ -1,10 +1,9 @@
 """The NiceGUI app: the lesson screen with its chat. Every UI string is in Portuguese."""
 
 import logging
-import shutil
+import re
 import socket
 from collections.abc import Awaitable, Callable
-from importlib.resources import files
 from pathlib import Path
 
 from nicegui import app, ui
@@ -17,24 +16,43 @@ from manimflow.agent import (
     CommandStarted,
     Event,
     FileChanged,
+    ImageViewed,
     LoginFailed,
     Session,
 )
+from manimflow.code_tab import CodeTab
+from manimflow.equations import EquationsPanel
+from manimflow.export_tab import ExportPanel
+from manimflow.plan_cards import PlanCards
 from manimflow.preview import PreviewPanel
+from manimflow.render import cache_dir
+from manimflow.sessions import SessionHistory
+from manimflow.settings import SettingsDialog, model_switch
+from manimflow.versioning import OUTSIDE_EDITS, History
 
 logger = logging.getLogger(__name__)
 
-EXAMPLES = Path(str(files("manimflow"))) / "exemplos"
-EXAMPLE_NAME = "Relatividade - herói e espelho"
+# The teacher's own edits since the agent's last turn, attached to the next message.
+MANUAL_EDITS = "edicoes-manuais.diff"
 
 _FILE_CHANGES = {"added": "Arquivo criado", "modified": "Arquivo alterado", "deleted": "Arquivo apagado"}
 
+# The steps of the agent's self-check, named for the teacher above the raw command.
+_STEPS = [
+    (re.compile(r"\bmanimflow\s+plan\s+validate\b"), "Validando o plano"),
+    (re.compile(r"\bmanimflow\s+preview\b"), "Renderizando a prévia"),
+    (re.compile(r"\bmanimflow\s+render\b"), "Renderizando a versão final"),
+    (re.compile(r"\bmanimflow\s+frames\b"), "Extraindo os quadros"),
+    (re.compile(r"\bmanimflow\s+check-continuity\b"), "Conferindo a continuidade"),
+    (re.compile(r"\bpytest\b.*\btest_fisica\.py\b"), "Rodando os testes de física"),
+]
 
-def serve(agent: Agent, lesson: Path) -> None:
-    """Serves the lesson screen on localhost only and opens it in the default browser."""
+
+def serve(agent: Agent, root: Callable[..., Awaitable[None]]) -> None:
+    """Serves the app's `root` page on localhost only and opens it in the default browser."""
     app.on_shutdown(agent.close)
     ui.run(
-        lesson_page(agent, lesson),
+        root,
         host="127.0.0.1",
         port=_free_port(),
         show=True,
@@ -44,19 +62,6 @@ def serve(agent: Agent, lesson: Path) -> None:
     )
 
 
-def example_copy(data: Path) -> Path:
-    """Copies the bundled example to ManimFlow's folder `data`, fresh on every launch,
-    so the original stays pristine.
-
-    Not to the temp folder: Codex's Windows sandbox never lets the agent in there.
-    """
-    lessons = data / "exemplo"
-    shutil.rmtree(lessons, ignore_errors=True)
-    lessons.mkdir(parents=True)
-    shutil.copy(EXAMPLES / "perfil.md", lessons)
-    return Path(shutil.copytree(EXAMPLES / "relatividade", lessons / EXAMPLE_NAME))
-
-
 def _free_port() -> int:
     # The teacher may already run Jupyter or another local server on the usual ports.
     with socket.socket() as probe:
@@ -64,29 +69,65 @@ def _free_port() -> int:
         return probe.getsockname()[1]
 
 
-def lesson_page(agent: Agent, lesson: Path) -> Callable[[], Awaitable[None]]:
-    """Builds the page for one lesson; each browser tab gets its own agent session."""
+def lesson_page(
+    agent: Agent, lesson: Path, sidebar: Callable[[], object] | None = None
+) -> Callable[[], Awaitable[None]]:
+    """Builds the page for one lesson; each browser tab gets its own agent session.
+
+    `sidebar` draws the side column, such as the list of lessons.
+    """
 
     async def page() -> None:
         ui.page_title(f"{lesson.name} · ManimFlow")
-        with ui.header().classes("items-center"):
+        history = History.open(lesson)
+        with ui.header().classes("items-center justify-between"):
+            ui.button("Minhas aulas", icon="arrow_back", on_click=lambda: ui.navigate.to("/")).props("flat color=white")
             ui.label(lesson.name).classes("text-lg")
+            controls = ui.row().classes("ml-auto items-center")
+        if sidebar is not None:
+            with ui.left_drawer(bordered=True).props("width=220"):
+                sidebar()
         body = ui.column().classes("w-full")
 
         async def open_chat() -> None:
             session = await agent.start_session(lesson)
+            controls.clear()
+            with controls:
+                SessionHistory(agent, lesson, current=session)
+                SettingsDialog(agent, await model_switch(agent), on_signed_out=sign_in)
             body.clear()
             with body, ui.row().classes("w-full no-wrap items-start gap-6"):
                 with ui.column().classes("w-1/2"):
-                    Chat(session)
-                with ui.scroll_area().classes("w-1/2 h-[calc(100vh-6rem)]"):
-                    PreviewPanel(lesson)
+                    chat = Chat(session, history)
+                with ui.column().classes("w-1/2 gap-0"):
+                    with ui.tabs().props("dense align=left") as tabs:
+                        ui.tab("Prévia")
+                        ui.tab("Código")
+                        ui.tab("Equações")
+                        ui.tab("Exportar")
+                    with ui.tab_panels(tabs, value="Prévia").classes("w-full"):
+                        with ui.tab_panel("Prévia").classes("p-0"):
+                            with ui.scroll_area().classes("h-[calc(100vh-9rem)]"):
+                                PlanCards(lesson, chat, history)
+                                PreviewPanel(lesson)
+                        with ui.tab_panel("Código").classes("p-0"):
+                            chat.on_busy(CodeTab(lesson, history).set_agent_working)
+                        with ui.tab_panel("Equações").classes("p-0"):
+                            with ui.scroll_area().classes("h-[calc(100vh-9rem)]"):
+                                EquationsPanel(lesson)
+                        with ui.tab_panel("Exportar"):
+                            ExportPanel(lesson)
+
+        def sign_in() -> None:
+            controls.clear()
+            body.clear()
+            with body:
+                SignIn(agent, on_signed_in=open_chat)
 
         if (await agent.account()).logged_in:
             await open_chat()
         else:
-            with body:
-                SignIn(agent, on_signed_in=open_chat)
+            sign_in()
 
     return page
 
@@ -149,8 +190,11 @@ class SignIn:
 
 
 class Chat:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, history: History) -> None:
         self.session = session
+        self.history = history
+        # Told when a turn starts and ends, for whatever must wait for the agent.
+        self._busy_listeners: list[Callable[[bool], None]] = []
         with ui.column().classes("w-full max-w-3xl mx-auto h-[calc(100vh-6rem)]"):
             with ui.scroll_area().classes("grow w-full") as self.scroll:
                 self.conversation = ui.column().classes("w-full gap-2").mark("conversation")
@@ -168,16 +212,39 @@ class Chat:
                 self.input.on("keydown.enter", self.send)
                 self.button = ui.button("Enviar", on_click=self.send)
 
+    def on_busy(self, listener: Callable[[bool], None]) -> None:
+        """Calls `listener` with True when a turn starts, before anything is committed,
+        and with False when it ends."""
+        self._busy_listeners.append(listener)
+
+    @property
+    def busy(self) -> bool:
+        """Whether the agent is still working on the last message."""
+        return not self.button.enabled
+
     async def send(self) -> None:
         text = (self.input.value or "").strip()
-        if not text or not self.button.enabled:
+        if not text or self.busy:
             return
         self.input.value = ""
+        await self.submit(text)
+
+    async def submit(self, text: str, summary: str | None = None) -> bool:
+        """Sends `text` as the teacher's message and shows the agent's turn as it streams.
+
+        The turn's version is named after `summary` when given, else after `text`.
+        False when the turn failed.
+        """
         self._set_busy(True)
         with self.conversation, ui.chat_message(name="Você", sent=True):
-            ui.label(text)
+            ui.label(text).classes("whitespace-pre-wrap")
+        # So the agent's commit holds only what the agent changed.
+        self._save_version(lambda: self.history.commit_manual_edit(OUTSIDE_EDITS))
+        ok = delivered = True
         try:
-            async for event in self.session.send(text):
+            async for event in self.session.send(text, self._manual_edits()):
+                ok = ok and not isinstance(event, AgentError)
+                delivered = delivered and not (isinstance(event, AgentError) and not event.delivered)
                 with self.conversation:
                     self._show(event)
                 self.scroll.scroll_to(percent=1)
@@ -186,13 +253,49 @@ class Chat:
             logger.exception("Agent turn failed")
             with self.conversation:
                 _error_row("O agente parou por um erro inesperado.")
+            ok = False
         finally:
+            # Even a failed turn may have changed files, and they must not be lost. A message
+            # the agent never got leaves the manual edits for the next one.
+            if delivered:
+                self._save_version(lambda: self.history.commit_agent_turn(summary or text))
             self._set_busy(False)
+        return ok
+
+    def _manual_edits(self) -> list[Path]:
+        """The diff of the teacher's edits since the agent's last turn, as an attachment
+        file, so the agent builds on them; none when there are no such edits."""
+        try:
+            diff = self.history.manual_changes()
+            if not diff:
+                return []
+            attachment = cache_dir(self.session.lesson) / MANUAL_EDITS
+            # As is: the diff holds each file's own line endings.
+            attachment.write_text(diff, encoding="utf-8", newline="")
+        except Exception:
+            # The message still goes: the teacher can tell the agent what they changed.
+            logger.exception("Manual changes failed")
+            with self.conversation:
+                _error_row("Não foi possível mandar ao agente as suas edições no código.")
+            return []
+        return [attachment]
+
+    def _save_version(self, commit: Callable[[], object]) -> None:
+        """Runs `commit`, telling the teacher when the version couldn't be saved; the
+        chat goes on either way."""
+        try:
+            commit()
+        except Exception:
+            logger.exception("Commit failed")
+            with self.conversation:
+                _error_row("Não foi possível salvar uma versão desta mudança.")
 
     def _set_busy(self, busy: bool) -> None:
         self.input.set_enabled(not busy)
         self.button.set_enabled(not busy)
         self.working.set_visibility(busy)
+        for listener in self._busy_listeners:
+            listener(busy)
 
     def _show(self, event: Event) -> None:
         match event:
@@ -201,6 +304,8 @@ class Chat:
                     ui.markdown(text)
             case CommandStarted(_, command):
                 with _event_row("terminal", "grey-7"):
+                    if step := _step(command):
+                        ui.label(step)
                     ui.label(command).classes("font-mono")
             case CommandFinished(_, command):
                 if event.ok:
@@ -212,8 +317,15 @@ class Chat:
             case FileChanged(path, change):
                 with _event_row("edit_document", "primary"):
                     ui.label(f"{_FILE_CHANGES[change]}: {path}")
+            case ImageViewed(path):
+                with _event_row("visibility", "primary"):
+                    ui.label(f"Olhou a imagem {Path(path).name}").tooltip(path)
             case AgentError(message):
                 _error_row(f"Erro do agente: {message}")
+
+
+def _step(command: str) -> str | None:
+    return next((step for pattern, step in _STEPS if pattern.search(command)), None)
 
 
 def _event_row(icon: str, color: str) -> ui.row:

@@ -2,8 +2,8 @@
 
 The SDK starts the bundled Codex app-server once and keeps it for the app's
 lifetime. Every session is a new Codex thread rooted in the lesson folder, with
-the ManimFlow base instructions, a sandbox that only writes inside the lesson,
-no network and no approval prompts.
+the ManimFlow base instructions and skill, a sandbox that only writes inside
+the lesson, no network and no approval prompts.
 """
 
 import asyncio
@@ -14,10 +14,21 @@ import sys
 import sysconfig
 import webbrowser
 from collections.abc import AsyncIterator, Callable, Sequence
+from datetime import UTC, datetime
 from importlib.resources import files
 from pathlib import Path
 
-from openai_codex import ApprovalMode, AsyncCodex, AsyncThread, CodexConfig, CodexError, Sandbox
+from openai_codex import (
+    ApprovalMode,
+    AsyncCodex,
+    AsyncThread,
+    CodexConfig,
+    CodexError,
+    InputItem,
+    Sandbox,
+    SkillInput,
+    TextInput,
+)
 from openai_codex.async_client import AsyncCodexClient
 from openai_codex.generated.v2_all import (
     AddPatchChangeKind,
@@ -31,13 +42,21 @@ from openai_codex.generated.v2_all import (
     DeletePatchChangeKind,
     FileChangeThreadItem,
     FileUpdateChange,
+    GetAccountRateLimitsResponse,
+    ImageViewThreadItem,
     ItemCompletedNotification,
     ItemStartedNotification,
     PatchApplyStatus,
+    RateLimitWindow,
     ReasoningEffort,
+    SortDirection,
+    TextUserInput,
+    ThreadListCwdFilter,
+    ThreadSortKey,
     Turn,
     TurnCompletedNotification,
     TurnStatus,
+    UserMessageThreadItem,
     WindowsSandboxReadiness,
     WindowsSandboxReadinessResponse,
     WindowsSandboxSetupCompletedNotification,
@@ -57,13 +76,24 @@ from manimflow.agent import (
     CommandStarted,
     Event,
     FileChanged,
+    ImageViewed,
     LoginFailed,
+    Message,
+    ModelOption,
     ModelSettings,
+    PastSession,
+    QuotaWindow,
+    teachers_words,
+    with_attachments,
 )
+from manimflow.model_presets import DEFAULT
 
 logger = logging.getLogger(__name__)
 
 BASE_INSTRUCTIONS = (files("manimflow") / "agent_instructions.md").read_text(encoding="utf-8")
+# How to use the manimflow CLI and the self-check loop, as a Codex skill.
+SKILL_NAME = "manimflow"
+SKILL = files("manimflow") / "skills" / SKILL_NAME / "SKILL.md"
 
 # Codex config for every thread. By default workspace_write also lets the agent
 # write to the temp folders, and the model may search the web; the lesson
@@ -103,12 +133,13 @@ class CodexAgent:
         self._codex: AsyncCodex | None = None
         # Readies the sandbox in the background, so the first page doesn't wait for it.
         self._sandbox: asyncio.Task[str | None] | None = None
-        self._settings: ModelSettings | None = None
+        self._settings = DEFAULT
 
     async def _client(self) -> AsyncCodex:
         if self._codex is None:
             # The app-server refuses to start when its home is missing.
             self.home.mkdir(parents=True, exist_ok=True)
+            self._install_skill()
             # `uvx manimflow` doesn't put its environment on PATH, and the agent
             # renders through the `manimflow` script that lives there.
             scripts = sysconfig.get_path("scripts")
@@ -119,6 +150,16 @@ class CodexAgent:
             self._codex = codex
             self._sandbox = asyncio.create_task(self._prepare_sandbox(codex, path))
         return self._codex
+
+    @property
+    def skill(self) -> Path:
+        """Where the skill lives in the Codex home; Codex only loads skills from its skill folders."""
+        return self.home / "skills" / SKILL_NAME / "SKILL.md"
+
+    def _install_skill(self) -> None:
+        # Rewritten on every start, so an upgraded ManimFlow brings its skill along.
+        self.skill.parent.mkdir(parents=True, exist_ok=True)
+        self.skill.write_text(SKILL.read_text(encoding="utf-8"), encoding="utf-8")
 
     async def _prepare_sandbox(self, codex: AsyncCodex, path: str) -> str | None:
         if sys.platform == "win32":
@@ -151,12 +192,55 @@ class CodexAgent:
         )
         return CodexSession(lesson, thread, self)
 
+    async def models(self) -> list[ModelOption]:
+        codex = await self._client()
+        return [
+            ModelOption(
+                model.model,
+                model.display_name,
+                tuple(option.reasoning_effort.value for option in model.supported_reasoning_efforts),
+                model.default_reasoning_effort.value,
+            )
+            for model in (await codex.models()).data
+        ]
+
+    async def past_sessions(self, lesson: Path) -> list[PastSession]:
+        """The lesson's threads, found by the folder they started in, newest first."""
+        codex = await self._client()
+        sessions: list[PastSession] = []
+        cursor: str | None = None
+        while True:
+            page = await codex.thread_list(
+                cwd=ThreadListCwdFilter(str(lesson.absolute())),
+                cursor=cursor,
+                sort_key=ThreadSortKey.created_at,
+                sort_direction=SortDirection.desc,
+            )
+            # A thread's preview is its first message; a thread without one never got a request.
+            sessions += [
+                PastSession(thread.id, datetime.fromtimestamp(thread.created_at, UTC), teachers_words(thread.preview))
+                for thread in page.data
+                if thread.preview
+            ]
+            if page.next_cursor is None:
+                return sessions
+            cursor = page.next_cursor
+
+    async def session_messages(self, session_id: str) -> list[Message]:
+        codex = await self._client()
+        thread = (await AsyncThread(codex, session_id).read(include_turns=True)).thread
+        messages: list[Message] = []
+        for past_turn in thread.turns:
+            for item in past_turn.items:
+                match item.root:
+                    case UserMessageThreadItem(content=content):
+                        text = "\n\n".join(part.root.text for part in content if isinstance(part.root, TextUserInput))
+                        messages.append(Message("teacher", teachers_words(text)))
+                    case AgentMessageThreadItem(text=text):
+                        messages.append(Message("agent", text))
+        return messages
+
     async def model_settings(self) -> ModelSettings:
-        if self._settings is None:
-            codex = await self._client()
-            catalog = (await codex.models()).data
-            default = next(model for model in catalog if model.is_default)
-            self._settings = ModelSettings(default.model, default.default_reasoning_effort.value)
         return self._settings
 
     async def set_model_settings(self, settings: ModelSettings) -> None:
@@ -195,6 +279,24 @@ class CodexAgent:
             raise LoginFailed("O login com o ChatGPT não foi concluído. Tente de novo.")
         return await self.account()
 
+    async def logout(self) -> None:
+        codex = await self._client()
+        await codex.logout()
+
+    async def quota(self) -> list[QuotaWindow] | None:
+        if (await self.account()).method != "chatgpt":
+            return None
+        codex = await self._client()
+        try:
+            usage = await _rpc(codex).request(
+                "account/rateLimits/read", None, response_model=GetAccountRateLimitsResponse
+            )
+        except CodexError as error:
+            logger.warning("Codex can't read the plan's usage: %s", error)
+            return None
+        limits = usage.rate_limits
+        return [_quota_window(window) for window in (limits.primary, limits.secondary) if window is not None]
+
     async def close(self) -> None:
         if self._sandbox is not None:
             self._sandbox.cancel()
@@ -204,13 +306,22 @@ class CodexAgent:
             self._codex = None
 
 
+def _rpc(codex: AsyncCodex) -> AsyncCodexClient:
+    """The SDK's JSON-RPC client, for the app-server requests the SDK has no wrapper for."""
+    return codex._client
+
+
+def _quota_window(window: RateLimitWindow) -> QuotaWindow:
+    resets_at = datetime.fromtimestamp(window.resets_at, UTC) if window.resets_at is not None else None
+    return QuotaWindow(window.used_percent, window.window_duration_mins, resets_at)
+
+
 async def _set_up_windows_sandbox(codex: AsyncCodex, home: Path) -> None:
     """Prepares Codex's Windows sandbox, and waits until it can enter the teacher's folders.
 
-    See docs/adr/0003-windows-sandbox-runs-elevated.md. The SDK has no wrapper for
-    these requests, so they go through its JSON-RPC client.
+    See docs/adr/0003-windows-sandbox-runs-elevated.md.
     """
-    client = codex._client
+    client = _rpc(codex)
     readiness = await client.request("windowsSandbox/readiness", None, response_model=WindowsSandboxReadinessResponse)
     if readiness.status != WindowsSandboxReadiness.ready:
         # Only the elevated mode cuts the network. It asks for administrator once;
@@ -258,23 +369,26 @@ def _windows_read_grants_running() -> bool:
 
 class CodexSession:
     def __init__(self, lesson: Path, thread: AsyncThread, agent: CodexAgent) -> None:
+        self.id = thread.id
         self.lesson = lesson
         self._thread = thread
         self._agent = agent
+        self._started = False
 
     async def send(self, text: str, attachments: Sequence[Path] = ()) -> AsyncIterator[Event]:
         # Every command would fail inside a sandbox that can't start, so the turn
         # would only spend quota.
         if problem := await self._agent.sandbox_problem():
-            yield AgentError(problem)
+            yield AgentError(problem, delivered=False)
             return
         settings = await self._agent.model_settings()
-        parts = [text] + [
-            f"Anexo {path.name}:\n\n{path.read_text(encoding='utf-8')}" for path in attachments
-        ]
-        handle = await self._thread.turn(
-            "\n\n".join(parts), model=settings.model, effort=ReasoningEffort(settings.effort)
-        )
+        message: list[InputItem] = [TextInput(with_attachments(text, attachments))]
+        if not self._started:
+            # Codex puts the skill's text into the thread itself, so the agent has it
+            # without reading the file, and later turns keep it in the history.
+            message.insert(0, SkillInput(SKILL_NAME, str(self._agent.skill)))
+            self._started = True
+        handle = await self._thread.turn(message, model=settings.model, effort=ReasoningEffort(settings.effort))
         async for notification in handle.stream():
             for event in _events(notification, self.lesson):
                 yield event
@@ -297,6 +411,8 @@ def _events(notification: Notification, lesson: Path) -> list[Event]:
                     return [CommandFinished(run.id, _command(run), exit_code)]
                 case FileChangeThreadItem(status=PatchApplyStatus.completed, changes=changes):
                     return [_file_changed(change, lesson) for change in changes]
+                case ImageViewThreadItem(path=path):
+                    return [ImageViewed(_shown(path.root, lesson))]
         case TurnCompletedNotification(turn=turn) if turn.status != TurnStatus.completed:
             return [_turn_failed(turn)]
     return []
@@ -309,12 +425,16 @@ def _command(run: CommandExecutionThreadItem) -> str:
     return run.command
 
 
+def _shown(path: str, lesson: Path) -> str:
+    """A path as the teacher reads it: relative to the lesson when inside it."""
+    resolved = Path(path).resolve()
+    if resolved.is_relative_to(lesson.resolve()):
+        return resolved.relative_to(lesson.resolve()).as_posix()
+    return str(resolved)
+
+
 def _file_changed(change: FileUpdateChange, lesson: Path) -> FileChanged:
-    path = Path(change.path).resolve()
-    if path.is_relative_to(lesson.resolve()):
-        shown = path.relative_to(lesson.resolve()).as_posix()
-    else:
-        shown = str(path)
+    shown = _shown(change.path, lesson)
     match change.kind.root:
         case AddPatchChangeKind():
             return FileChanged(shown, "added")

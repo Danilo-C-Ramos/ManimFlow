@@ -1,0 +1,177 @@
+"""The agent's settings: the "Rápido / Caprichado" switch on the lesson screen, and the
+settings dialog one click away with "Avançado". Every UI string is in Portuguese."""
+
+import logging
+from collections.abc import Callable
+from datetime import datetime
+
+from nicegui import events, ui
+
+from manimflow.agent import Account, Agent, ModelOption, ModelSettings, QuotaWindow
+from manimflow.model_presets import PRESETS, preset_name
+
+logger = logging.getLogger(__name__)
+
+EFFORTS = {
+    "none": "Nenhum",
+    "minimal": "Mínimo",
+    "low": "Baixo",
+    "medium": "Médio",
+    "high": "Alto",
+    "xhigh": "Muito alto",
+    "max": "Máximo",
+    "ultra": "Ultra",
+}
+
+
+class ModelSwitch:
+    """Switches the agent between the two presets; from the next turn on."""
+
+    def __init__(self, agent: Agent, current: ModelSettings) -> None:
+        self.agent = agent
+        self.toggle = ui.toggle(list(PRESETS), value=preset_name(current), on_change=self._changed)
+        self.toggle.props("dense no-caps").mark("preset")
+
+    def show(self, settings: ModelSettings) -> None:
+        """Moves the switch to `settings`, or to neither preset when they match none."""
+        self.toggle.set_value(preset_name(settings))
+
+    async def _changed(self, event: events.ValueChangeEventArguments) -> None:
+        # None when the teacher picked a model in "Avançado".
+        if event.value is not None:
+            await self.agent.set_model_settings(PRESETS[event.value])
+
+
+async def model_switch(agent: Agent) -> ModelSwitch:
+    return ModelSwitch(agent, await agent.model_settings())
+
+
+class SettingsDialog:
+    """A gear button that opens the settings, read fresh from the agent each time."""
+
+    def __init__(self, agent: Agent, switch: ModelSwitch, on_signed_out: Callable[[], None]) -> None:
+        self.agent = agent
+        self.switch = switch
+        self.on_signed_out = on_signed_out
+        self.dialog = ui.dialog()
+        ui.button(icon="settings", on_click=self.open).props("flat round color=white").tooltip(
+            "Configurações"
+        ).mark("open-settings")
+
+    async def open(self) -> None:
+        account = await self.agent.account()
+        settings = await self.agent.model_settings()
+        models = await self.agent.models()
+        quota = await self.agent.quota()
+        self.dialog.clear()
+        with self.dialog, ui.card().classes("w-full max-w-lg items-stretch gap-4"):
+            ui.label("Configurações").classes("text-lg")
+            with ui.row().classes("items-center no-wrap"):
+                ui.label(_signed_in_as(account)).classes("grow")
+                ui.button("Sair", on_click=self._sign_out).props("outline")
+            if quota:
+                with ui.column().classes("w-full gap-2").mark("quota"):
+                    ui.label("Uso do plano do ChatGPT").classes("text-subtitle1")
+                    for window in quota:
+                        _quota_row(window)
+            with ui.expansion("Avançado", icon="tune").classes("text-grey-8"):
+                AdvancedSettings(self.agent, models, settings, self.switch)
+            ui.button("Fechar", on_click=self.dialog.close).props("flat").classes("self-end")
+        self.dialog.open()
+
+    async def _sign_out(self) -> None:
+        try:
+            await self.agent.logout()
+        except Exception:
+            logger.exception("Logout failed")
+            ui.notify("Não foi possível sair agora. Tente de novo.", type="negative")
+            return
+        self.dialog.close()
+        self.on_signed_out()
+
+
+def _signed_in_as(account: Account) -> str:
+    match account.method:
+        case "chatgpt" if account.email:
+            return f"Conectado com o ChatGPT: {account.email}"
+        case "chatgpt":
+            return "Conectado com o ChatGPT"
+        case "api_key":
+            return "Conectado com uma chave de API da OpenAI"
+    # A provider configured without OpenAI auth, such as a local model.
+    return "Conectado"
+
+
+class AdvancedSettings:
+    """Picks the model and the reasoning effort by hand, among those the account offers."""
+
+    def __init__(self, agent: Agent, models: list[ModelOption], current: ModelSettings, switch: ModelSwitch) -> None:
+        self.agent = agent
+        self.switch = switch
+        self.models = {option.model: option for option in models}
+        # Keeps the current model pickable when the account's list lacks it.
+        self.models.setdefault(current.model, ModelOption(current.model, current.model, (), current.effort))
+        self.model = ui.select(
+            {model: option.name for model, option in self.models.items()},
+            value=current.model,
+            label="Modelo",
+            on_change=self._model_changed,
+        ).mark("model")
+        self.effort = ui.select(
+            self._efforts(current.model, current.effort),
+            value=current.effort,
+            label="Esforço de raciocínio",
+            on_change=self._apply,
+        ).mark("effort")
+
+    def _efforts(self, model: str, effort: str) -> dict[str, str]:
+        """The model's efforts with their labels, `effort` included."""
+        efforts = list(self.models[model].efforts)
+        if effort not in efforts:
+            efforts.append(effort)
+        return {effort: EFFORTS.get(effort, effort) for effort in efforts}
+
+    async def _model_changed(self) -> None:
+        option = self.models[self.model.value]
+        effort = self.effort.value if self.effort.value in option.efforts else option.default_effort
+        self.effort.set_options(self._efforts(option.model, effort), value=effort)
+        await self._apply()
+
+    async def _apply(self) -> None:
+        settings = ModelSettings(self.model.value, self.effort.value)
+        await self.agent.set_model_settings(settings)
+        self.switch.show(settings)
+
+
+def _quota_row(window: QuotaWindow) -> None:
+    with ui.column().classes("w-full gap-1"):
+        with ui.row().classes("w-full items-baseline justify-between"):
+            ui.label(f"{_limit_name(window.minutes)}: {window.used_percent}% usado")
+            if window.resets_at is not None:
+                ui.label(_resets(window.resets_at)).classes("text-caption text-grey-7")
+        color = "negative" if window.used_percent >= 90 else "primary"
+        ui.linear_progress(window.used_percent / 100, show_value=False, color=color)
+
+
+def _limit_name(minutes: int | None) -> str:
+    match minutes:
+        case None:
+            return "Limite de uso"
+        case 1440:
+            return "Limite diário"
+        case 10080:
+            return "Limite semanal"
+        case _ if minutes % 1440 == 0:
+            return f"Limite de {minutes // 1440} dias"
+        case 60:
+            return "Limite de 1 hora"
+        case _ if minutes % 60 == 0:
+            return f"Limite de {minutes // 60} horas"
+    return f"Limite de {minutes} minutos"
+
+
+def _resets(when: datetime) -> str:
+    local = when.astimezone()
+    if local.date() == datetime.now().astimezone().date():
+        return f"renova às {local:%H:%M}"
+    return f"renova em {local:%d/%m} às {local:%H:%M}"
