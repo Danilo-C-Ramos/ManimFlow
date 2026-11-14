@@ -1,0 +1,1034 @@
+<!doctype html>
+<!--
+  PROTOTYPE — throwaway. Round 2. Switch with ?variant=F|C, the pink bar (bottom right) or ← →.
+    F · Final      — merges round 1 as agreed: B's studio lesson screen and B's course page,
+                     A's ChatGPT home and inline chat cards. The preview resizes with the
+                     mouse (drag the bar between chat and preview) and closes entirely (✕).
+    C · Colorido   — the same base, with more color and more ideas from the Mobbin
+                     references: a sidebar of courses, lessons, status and quick actions instead
+                     of a chat history; comments pinned on the image; a proportional timeline;
+                     a command palette; suggestion chips; approve-in-composer.
+  Round 1 (A and B) is kept in v1-a-b.html. Open the file in a browser; nothing persists.
+-->
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ManimFlow · protótipo 2</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/yaml.min.js"></script>
+<style>
+:root{
+  --bg:#ffffff; --side:#f9f9f9; --hover:#ececec; --active:#e3e3e3; --line:#e5e5e5;
+  --text:#0d0d0d; --muted:#6b6b6b; --faint:#9b9b9b; --bubble:#f1f1f1; --card:#fff;
+  --accent:#0d0d0d; --accent-text:#fff; --accent-soft:#ececec;
+  --blue:#2563eb; --green:#16a34a; --orange:#d9480f; --red:#dc2626; --amber:#d97706; --teal:#0d9488;
+  --shadow:0 1px 2px rgba(0,0,0,.05),0 4px 16px rgba(0,0,0,.06);
+}
+/* Variant C: a colored accent and tinted surfaces */
+body.c{ --accent:#1d64d8; --accent-text:#fff; --accent-soft:#e7effc; --side:#f6f8fb; --hover:#eaeff6; --active:#dce7f9; --bubble:#e7effc; }
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{font:14px/1.5 ui-sans-serif,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--text);background:var(--bg);overflow:hidden}
+body.resizing{cursor:col-resize;user-select:none}
+body.resizing iframe,body.resizing svg{pointer-events:none}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;padding:0}
+input,textarea{font:inherit;color:inherit}
+kbd{font:11px ui-monospace,monospace;border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:0 5px;color:var(--muted);background:var(--bg)}
+.app{display:flex;height:100vh}
+.muted{color:var(--muted)} .faint{color:var(--faint)} .small{font-size:12px} .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.row{display:flex;align-items:center;gap:8px} .grow{flex:1;min-width:0} .col{display:flex;flex-direction:column}
+.ellipsis{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* ── Sidebar ───────────────────────────────────────────────── */
+.side{width:268px;flex:none;background:var(--side);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:8px;gap:2px}
+.side .top{display:flex;justify-content:space-between;align-items:center;padding:6px 6px 10px}
+.logo{width:28px;height:28px;border-radius:8px;background:var(--accent);color:var(--accent-text);display:grid;place-items:center;font-weight:700;font-size:13px}
+body.c .logo{background:var(--accent)}
+.nav{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;width:100%;text-align:left;white-space:nowrap;overflow:hidden;position:relative}
+.nav:hover{background:var(--hover)} .nav.on{background:var(--active)}
+.nav .ic{width:18px;text-align:center;flex:none;opacity:.85}
+.sec{font-size:12px;color:var(--faint);padding:14px 10px 4px;display:flex;align-items:center;gap:6px}
+.sub .nav{padding-left:38px;font-size:13.5px}
+.sidescroll{flex:1;overflow:auto;margin:0 -8px;padding:0 8px}
+.usage{margin:6px 4px;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--bg);font-size:12px;cursor:pointer}
+.bar{height:6px;border-radius:3px;background:var(--hover);overflow:hidden;margin-top:4px}
+.bar i{display:block;height:100%;background:var(--green)}
+body.c .bar i{background:var(--accent)}
+.me{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px}
+.me:hover{background:var(--hover)}
+.avatar{width:28px;height:28px;border-radius:50%;background:#d6e4f0;color:#1f4f7a;display:grid;place-items:center;font-weight:600;font-size:12px;flex:none}
+
+/* sidebar C: courses tree with status and quick actions */
+.newbtn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:9px;border-radius:10px;background:var(--accent);color:var(--accent-text);font-weight:600}
+.newbtn:hover{filter:brightness(1.08)}
+.searchbtn{display:flex;align-items:center;gap:8px;width:100%;padding:7px 10px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--muted);margin-top:6px}
+.searchbtn:hover{border-color:#c4d5ef}
+.count{font-size:11px;border-radius:999px;padding:0 7px;background:var(--hover);color:var(--muted)}
+.count.hot{background:#fff1d6;color:#a35400}
+.inbox{display:flex;gap:10px;padding:7px 10px;border-radius:8px;width:100%;text-align:left;align-items:flex-start}
+.inbox:hover{background:var(--hover)}
+.dot{width:8px;height:8px;border-radius:50%;flex:none;margin-top:6px}
+.tsq{width:22px;height:22px;border-radius:7px;display:grid;place-items:center;font-size:12px;flex:none;font-weight:600}
+.trow{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:8px;width:100%;cursor:pointer;position:relative}
+.trow:hover{background:var(--hover)} .trow.on{background:var(--active)}
+.chev{width:16px;color:var(--faint);font-size:10px;text-align:center;transition:transform .15s}
+.chev.open{transform:rotate(90deg)}
+.lrowS{display:flex;align-items:center;gap:8px;padding:5px 8px 5px 34px;border-radius:8px;width:100%;cursor:pointer;font-size:13.5px;position:relative}
+.lrowS:hover{background:var(--hover)} .lrowS.on{background:var(--active)}
+.qa{display:none;gap:2px;position:absolute;right:4px;top:50%;transform:translateY(-50%);background:inherit;padding-left:6px}
+.trow:hover .qa,.lrowS:hover .qa{display:flex}
+.qa button{width:24px;height:24px;border-radius:6px;display:grid;place-items:center;font-size:12px;color:var(--muted)}
+.qa button:hover{background:var(--bg);color:var(--text);box-shadow:0 0 0 1px var(--line)}
+.trow:hover .hide-on-hover,.lrowS:hover .hide-on-hover{visibility:hidden}
+
+/* ── Main area ─────────────────────────────────────────────── */
+.main{flex:1;display:flex;flex-direction:column;min-width:0}
+.topbar{height:52px;flex:none;display:flex;align-items:center;gap:8px;padding:0 14px;border-bottom:1px solid transparent}
+.topbar.lined{border-bottom-color:var(--line)}
+.crumb{display:flex;align-items:center;gap:6px;font-size:15px;padding:6px 8px;border-radius:8px}
+.crumb:hover{background:var(--hover)}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:999px;border:1px solid var(--line);background:var(--bg);font-size:13.5px;white-space:nowrap}
+.btn:hover{background:var(--hover)}
+.btn.primary{background:var(--accent);color:var(--accent-text);border-color:var(--accent)}
+.btn.primary:hover{filter:brightness(1.1)}
+.btn.ghost{border-color:transparent}
+.btn.sm{padding:4px 10px;font-size:12.5px}
+.iconbtn{width:32px;height:32px;border-radius:8px;display:grid;place-items:center;color:var(--muted)}
+.iconbtn:hover{background:var(--hover);color:var(--text)}
+.content{flex:1;display:flex;min-height:0}
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;padding:2px 8px;border-radius:999px;white-space:nowrap;font-weight:500}
+
+/* ── Composer ──────────────────────────────────────────────── */
+.composer{border:1px solid var(--line);border-radius:24px;background:var(--bg);box-shadow:var(--shadow);padding:10px 10px 8px 16px}
+body.c .composer:focus-within{border-color:#a9c4ef;box-shadow:0 0 0 4px #e7effc}
+.composer textarea{width:100%;border:0;outline:0;resize:none;background:none;min-height:24px;max-height:160px;padding:4px 0}
+.composer .tools{display:flex;align-items:center;gap:6px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;border:1px solid var(--line);font-size:12.5px;background:var(--bg);white-space:nowrap}
+.chip:hover{background:var(--hover)} .chip.on{background:var(--accent-soft);border-color:transparent;color:var(--accent)}
+body:not(.c) .chip.on{background:#e8f0f8;color:#174a77}
+.send{width:34px;height:34px;border-radius:50%;background:var(--accent);color:var(--accent-text);display:grid;place-items:center;font-size:16px;flex:none}
+.attach{display:flex;gap:6px;flex-wrap:wrap;padding:2px 0 6px}
+.attach .chip{background:#fff6e0;border-color:#f6dfa6;color:#7a4b00}
+.approvebar{display:flex;align-items:center;gap:8px;margin:-2px -2px 8px -8px;padding:8px 8px 8px 12px;border-radius:14px;background:#fff7e6;color:#7a4b00;font-size:13px}
+.suggest{display:flex;gap:6px;overflow-x:auto;padding:0 2px 8px;scrollbar-width:none}
+.suggest .chip{color:var(--muted)}
+body.c .suggest .chip:nth-child(4n+1){background:#e7effc;color:#1d64d8;border-color:transparent}
+body.c .suggest .chip:nth-child(4n+2){background:#e9f7ef;color:#137a3a;border-color:transparent}
+body.c .suggest .chip:nth-child(4n+3){background:#fff2e8;color:#b4400a;border-color:transparent}
+body.c .suggest .chip:nth-child(4n+4){background:#e0f4f2;color:#0b7a70;border-color:transparent}
+
+/* ── Chat ──────────────────────────────────────────────────── */
+.thread{flex:1;overflow:auto}
+.thread-inner{margin:0 auto;padding:18px;display:flex;flex-direction:column;gap:14px;font-size:13.5px}
+.msg-user{align-self:flex-end;max-width:85%;background:var(--bubble);padding:9px 14px;border-radius:18px;white-space:pre-wrap}
+.msg-agent{display:flex;flex-direction:column;gap:10px}
+.msg-agent p{margin:0}
+.actions{display:flex;gap:2px;color:var(--muted);align-items:center;font-size:12.5px} .actions button{padding:3px 7px;border-radius:6px} .actions button:hover{background:var(--hover)}
+.checkpoint{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--faint)}
+.checkpoint::before,.checkpoint::after{content:"";flex:1;border-top:1px dashed var(--line)}
+.activity{border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--bg)}
+.activity summary{list-style:none;cursor:pointer;padding:9px 12px;display:flex;align-items:center;gap:10px;color:var(--muted)}
+.activity summary::-webkit-details-marker{display:none}
+.activity summary:hover{background:var(--side)}
+.activity ol{list-style:none;margin:0;padding:6px 12px 10px;display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--line)}
+.activity li{display:flex;gap:10px;align-items:flex-start;font-size:12.5px}
+.activity li .cmd{color:var(--faint);font-size:11px}
+.ok{color:var(--green)} .bad{color:var(--red)} .run{color:var(--blue)}
+.spin{display:inline-block;width:12px;height:12px;border:2px solid #c7d7f5;border-top-color:var(--blue);border-radius:50%;animation:sp .8s linear infinite;flex:none}
+@keyframes sp{to{transform:rotate(360deg)}}
+.plan{border:1px solid var(--line);border-radius:16px;background:var(--side);padding:12px 14px}
+.plan h4{margin:0 0 8px;font-size:13.5px;font-weight:600}
+.plan .st{display:grid;grid-template-columns:40px 1fr auto;gap:10px;padding:7px 0;border-top:1px solid var(--line);align-items:start}
+.plan .st:first-of-type{border-top:0}
+.tag{font:600 11px ui-monospace,monospace;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:1px 5px;text-align:center;white-space:nowrap}
+.trans{font-size:12px;color:var(--muted);padding-left:50px;margin:-2px 0 2px}
+.comment{font-size:12px;color:#8a5a00;background:#fff6e0;border-radius:8px;padding:3px 8px;margin-top:4px;display:inline-block}
+.result{border:1px solid var(--line);border-radius:14px;overflow:hidden;cursor:pointer;background:var(--card)}
+.result:hover{box-shadow:var(--shadow)}
+.result .strip{display:flex;gap:6px;padding:8px;background:var(--side);overflow:hidden}
+.result .strip svg{width:96px;flex:none;border-radius:6px;border:1px solid var(--line)}
+.result .foot{display:flex;align-items:center;gap:10px;padding:9px 12px}
+
+/* ── Resizable split ───────────────────────────────────────── */
+.chatcol{flex:none;display:flex;flex-direction:column;min-height:0;min-width:0}
+.chatcol.full{flex:1}
+.chatcol.full .thread-inner,.chatcol.full .composer-wrap{max-width:740px;width:100%;margin:0 auto}
+.resizer{width:9px;flex:none;cursor:col-resize;position:relative;margin:0 -4px;z-index:5}
+.resizer::before{content:"";position:absolute;left:4px;top:0;bottom:0;width:1px;background:var(--line)}
+.resizer::after{content:"";position:absolute;left:2px;top:50%;width:5px;height:40px;margin-top:-20px;border-radius:3px;background:#cfcfcf;opacity:0;transition:opacity .15s}
+.resizer:hover::before,body.resizing .resizer::before{background:var(--accent);width:2px;left:3.5px}
+.resizer:hover::after,body.resizing .resizer::after{opacity:1;background:var(--accent)}
+.ws{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0;container-type:inline-size;background:var(--bg)}
+
+/* ── Workspace ─────────────────────────────────────────────── */
+.tabs{display:flex;gap:2px;padding:8px 10px;border-bottom:1px solid var(--line);align-items:center;flex:none}
+.tab{padding:6px 12px;border-radius:8px;font-size:13.5px;color:var(--muted)}
+.tab:hover{background:var(--hover)} .tab.on{background:var(--active);color:var(--text)}
+body.c .tab.on{background:var(--accent-soft);color:var(--accent);font-weight:500}
+.pbody{flex:1;overflow:auto;min-height:0}
+.stage{position:relative;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;aspect-ratio:16/9;width:min(100%, calc((100vh - 330px) * 1.7778));margin:0 auto}
+.stage svg{width:100%;height:100%;display:block}
+.stage.pinning{cursor:crosshair;box-shadow:0 0 0 3px #f6c453}
+.pin{position:absolute;width:26px;height:26px;margin:-26px 0 0 -2px;border-radius:13px 13px 13px 2px;background:#f59f00;color:#fff;font:600 12px/26px sans-serif;text-align:center;box-shadow:0 2px 6px rgba(0,0,0,.25);cursor:pointer}
+.pin.done{background:var(--green)}
+.pinbox{position:absolute;background:var(--bg);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:8px;width:240px;z-index:3}
+.pinbox input{width:100%;border:1px solid var(--line);border-radius:8px;padding:6px 8px;outline:0}
+.overlay{position:absolute;inset:0;background:#f6f8fb;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;}
+.overlay .lines div{font-size:13px;color:var(--faint);text-align:center;transition:all .3s}
+.overlay .lines div.now{color:var(--text);font-weight:500}
+.player{display:flex;align-items:center;gap:10px;padding:8px 2px;max-width:100%;margin:0 auto}
+.scrub{flex:1;height:4px;border-radius:2px;background:var(--hover);position:relative}
+.scrub i{position:absolute;inset:0 auto 0 0;background:var(--text);border-radius:2px}
+.film{display:flex;align-items:center;overflow-x:auto;padding:10px 16px 14px}
+.frame{flex:none;width:140px;border-radius:10px;border:2px solid transparent;padding:3px;cursor:pointer}
+.frame:hover{background:var(--side)} .frame.on{border-color:var(--blue)}
+.frame svg{width:100%;border-radius:6px;border:1px solid var(--line);display:block}
+.frame .cap{font-size:12px;padding:4px 2px 0;display:flex;gap:6px}
+.tpill{flex:none;display:flex;flex-direction:column;align-items:center;font-size:11px;color:var(--muted);padding:0 4px;margin-top:-18px;cursor:pointer}
+.tpill b{width:30px;height:24px;border-radius:999px;border:1px solid var(--line);display:grid;place-items:center;font-size:11px;color:var(--text);background:var(--bg)}
+.tpill:hover b{background:var(--accent);color:var(--accent-text)}
+.tpill.on b{background:var(--blue);color:#fff;border-color:var(--blue)}
+
+/* C: vertical states rail + proportional timeline */
+.pv{display:flex;height:100%}
+.rail{width:150px;flex:none;border-right:1px solid var(--line);overflow:auto;padding:10px 8px;background:var(--side)}
+@container (max-width:620px){ .rail{display:none} }
+.rstate{display:block;width:100%;border-radius:10px;padding:5px;border:2px solid transparent;text-align:left}
+.rstate:hover{background:var(--hover)} .rstate.on{border-color:var(--accent);background:var(--bg)}
+.rstate svg{width:100%;border-radius:6px;border:1px solid var(--line);display:block}
+.rstate .cap{display:flex;gap:6px;font-size:11.5px;padding-top:3px;align-items:center}
+.rtrans{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);padding:2px 10px;margin:0 auto;border-radius:999px}
+.rtrans:hover{background:var(--accent-soft);color:var(--accent)}
+.stagecol{flex:1;min-width:0;display:flex;flex-direction:column;padding:12px 18px;gap:8px;overflow:auto}
+.track{display:flex;gap:3px;align-items:stretch;height:46px;margin-top:4px}
+.blk{border-radius:8px;font-size:11px;padding:4px 6px;overflow:hidden;white-space:nowrap;cursor:pointer;position:relative;display:flex;flex-direction:column;justify-content:center;min-width:0}
+.blk span{position:relative;z-index:1;overflow:hidden;text-overflow:ellipsis}
+.blk .fill{position:absolute;inset:0 auto 0 0;background:rgba(0,0,0,.12)}
+.blk.cut{background:var(--side);border:1px dashed var(--line);color:var(--faint);cursor:default}
+.ruler{display:flex;justify-content:space-between;font-size:10.5px;color:var(--faint);font-family:ui-monospace,monospace}
+
+/* code / equations / plan board */
+.code{display:flex;height:100%}
+.files{width:170px;flex:none;border-right:1px solid var(--line);padding:8px;font-size:13px}
+.file{display:flex;gap:8px;padding:5px 8px;border-radius:6px;width:100%;text-align:left}
+.file:hover{background:var(--hover)} .file.on{background:var(--active)}
+.editor{flex:1;min-width:0;display:flex;flex-direction:column}
+.editor pre{margin:0;flex:1;overflow:auto;padding:14px 16px;font-size:12.5px;line-height:1.6;outline:none}
+.editor pre code.hljs{background:none;padding:0}
+.edbar{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--line);font-size:12.5px}
+.dirty{width:8px;height:8px;border-radius:50%;background:var(--orange)}
+.eq{display:grid;grid-template-columns:1fr auto;gap:4px 16px;padding:12px 16px;border-bottom:1px solid var(--line)}
+.eq .name{font-size:12px;color:var(--muted);grid-column:1/-1}
+.eq .val{font-variant-numeric:tabular-nums;white-space:nowrap;align-self:center}
+.eqh{font-size:12px;color:var(--faint);padding:14px 16px 4px;text-transform:uppercase;letter-spacing:.04em}
+.cards{display:flex;align-items:stretch;overflow-x:auto;padding:16px}
+.pcard{flex:none;width:210px;border:1px solid var(--line);border-radius:14px;padding:12px;background:var(--card);display:flex;flex-direction:column;gap:8px}
+.pcard svg{width:100%;border-radius:6px;border:1px solid var(--line)}
+.pcard textarea{border:1px solid transparent;border-radius:8px;padding:4px 6px;margin:-4px -6px;resize:none;font-size:13px;color:var(--muted);min-height:96px;background:none}
+.pcard textarea:hover,.pcard textarea:focus{border-color:var(--line);outline:0;background:var(--side)}
+.parrow{flex:none;width:64px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:11.5px;color:var(--muted)}
+
+/* ── Pages ─────────────────────────────────────────────────── */
+.center{flex:1;overflow:auto}
+.ptitle{display:flex;align-items:center;gap:12px;font-size:26px;font-weight:500}
+.picon{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;font-size:18px;flex:none}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px}
+.gcard{border:1px solid var(--line);border-radius:14px;overflow:hidden;cursor:pointer;background:var(--card);position:relative}
+.gcard:hover{box-shadow:var(--shadow)}
+.gcard svg,.gcard .ph{width:100%;display:block;border-bottom:1px solid var(--line);aspect-ratio:16/9}
+.gcard .b{padding:10px 12px}
+.gcard .hover{position:absolute;top:8px;right:8px;display:none;gap:4px}
+.gcard:hover .hover{display:flex}
+.gcard .hover button{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:3px 8px;font-size:12px;box-shadow:var(--shadow)}
+.gcard .hover button:hover{background:var(--hover)}
+.newcard{border:1.5px dashed var(--line);border-radius:14px;display:grid;place-items:center;min-height:180px;color:var(--muted);cursor:pointer}
+.newcard:hover{background:var(--side);border-color:var(--accent);color:var(--accent)}
+.instr{border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin-bottom:12px;background:var(--bg)}
+.instr h5{margin:0 0 4px;font-size:13.5px}
+.band{border-radius:20px;padding:22px 24px;margin-bottom:20px;position:relative;overflow:hidden}
+.stat{background:rgba(255,255,255,.7);border-radius:12px;padding:8px 12px;font-size:12px}
+.stat b{display:block;font-size:18px;font-weight:600}
+.ltabs{display:flex;gap:4px;margin:0 0 14px;border-bottom:1px solid var(--line)}
+.ltab{padding:8px 12px;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px}
+.ltab.on{color:var(--text);border-color:var(--accent);font-weight:500}
+.group{font-size:13px;font-weight:600;margin:18px 0 10px;display:flex;align-items:center;gap:8px}
+.todo{display:flex;gap:12px;align-items:center;border:1px solid var(--line);border-radius:14px;padding:12px 14px;cursor:pointer;background:var(--bg)}
+.todo:hover{box-shadow:var(--shadow)}
+
+/* ── Modal / menu / palette ────────────────────────────────── */
+.scrim{position:fixed;inset:0;background:rgba(10,10,30,.35);display:grid;place-items:center;z-index:50}
+.scrim.top{place-items:start center;padding-top:12vh}
+.modal{background:var(--bg);border-radius:18px;box-shadow:0 20px 60px rgba(0,0,0,.25);width:min(560px,calc(100vw - 32px));max-height:calc(100vh - 64px);overflow:auto}
+.modal.wide{width:min(820px,calc(100vw - 32px))}
+.mhead{display:flex;align-items:center;padding:16px 20px 8px;font-size:17px;font-weight:600}
+.mbody{padding:8px 20px 20px;display:flex;flex-direction:column;gap:14px}
+.field{border:1px solid var(--line);border-radius:10px;padding:9px 12px;width:100%;outline:0;background:var(--bg)}
+.hint{display:flex;gap:10px;background:var(--side);border-radius:10px;padding:10px 12px;font-size:12.5px;color:var(--muted)}
+.presets{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.preset{border:1px solid var(--line);border-radius:12px;padding:10px;text-align:left;font-size:12px;color:var(--muted)}
+.preset b{display:block;color:var(--text);font-size:13.5px;margin-bottom:2px}
+.preset.on{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+body.c .preset.on{background:var(--accent-soft)}
+.setting{display:flex;align-items:center;gap:16px;padding:10px 0;border-top:1px solid var(--line)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:10px;padding:2px;gap:2px}
+.seg button{padding:4px 10px;border-radius:8px;font-size:12.5px}
+.seg button.on{background:var(--active)}
+.seg button:disabled{color:var(--faint);cursor:not-allowed}
+.settings{display:flex;min-height:420px}
+.settings nav{width:180px;border-right:1px solid var(--line);padding:12px 8px}
+.settings section{flex:1;padding:16px 22px}
+.settings h3{margin:0 0 14px;font-size:17px;font-weight:600}
+.menu{position:absolute;background:var(--bg);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:6px;z-index:40;min-width:220px}
+.menu button{display:flex;gap:10px;width:100%;text-align:left;padding:7px 10px;border-radius:8px}
+.menu button:hover{background:var(--hover)}
+.palette .item{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:10px;width:100%;text-align:left}
+.palette .item:hover,.palette .item.on{background:var(--accent-soft)}
+.palette .grp{font-size:11.5px;color:var(--faint);padding:10px 12px 4px}
+
+/* ── Prototype switcher (not part of the design) ───────────── */
+.switcher{position:fixed;bottom:14px;right:14px;z-index:100;display:flex;align-items:center;gap:6px;background:#111;color:#fff;border-radius:999px;padding:6px;box-shadow:0 6px 24px rgba(0,0,0,.35);font-size:13px;border:2px solid #ff3d7f}
+.switcher button{color:#fff;width:30px;height:30px;border-radius:50%} .switcher button:hover{background:#333}
+.switcher span{padding:0 10px;white-space:nowrap}
+.switcher .tag-proto{background:#ff3d7f;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700}
+@media (max-width:900px){ .side{display:none} .presets{grid-template-columns:repeat(2,1fr)} }
+</style>
+</head>
+<body>
+<div id="app" class="app"></div>
+<div id="modal"></div>
+<div class="switcher" id="switcher"></div>
+<script>
+// ═════════════════════════════════════════════════════════════
+//  Fake data — the bundled relativity example, plus made-up lessons
+// ═════════════════════════════════════════════════════════════
+const ORDER = ['S0','S1','S2','S2b','S2c','S3','S5','S3v','R'];
+const STATES = {
+  S0:{t:'Diagrama da Terra', v:'Eixos da Terra, a linha da Terra em x = 8 e o herói na origem.'},
+  S1:{t:'Eixos do herói', v:'Os eixos oblíquos do herói, já em v = 0,6, sobre os eixos da Terra.'},
+  S2:{t:'Reflexão', v:'A Emissão em (0, 0), o herói e a luz até a Reflexão, (8, 8) em azul.'},
+  S2b:{t:'Instante da Reflexão', v:'Em verde, o tracejado t_T = 8 até o herói, o relógio dele (6,4) e (4,8, 8).'},
+  S2c:{t:'Coordenadas do herói', v:'Sem o verde. Tracejados laranja até os eixos do herói e (4, 4).'},
+  S3:{t:'Colisão', v:'O raio refletido e o herói até a Colisão, (6, 10) em azul e (0, 8) em laranja.', c:'O rótulo "Colisão" está perto da borda de cima do quadro.'},
+  S5:{t:'Simultaneidade', v:'A linha verde de simultaneidade do herói, de t_H = 0 até a Terra.'},
+  S3v:{t:'De volta à Colisão', v:'A mesma imagem do S3, para o boost começar dela.'},
+  R:{t:'Referencial do herói', v:'O diagrama no referencial do herói, eixos dele ortogonais.', c:'Confirmar com o grupo que os eixos oblíquos vêm antes deste diagrama.'},
+};
+const TRANS = {S1:4,S2:4.7,S2b:3.5,S2c:1.9,S3:2.6,S5:4,R:4.7};   // keyed by the state they lead to
+const TRANS_DESC = {
+  S1:'Os eixos do herói aparecem e se fecham de v = 0 até 0,6.',
+  S2:'A Emissão entra com um flash; herói e luz crescem até a Reflexão.',
+  S2b:'O verde entra em ordem: tracejado, 6,4, vertical, (4,8, 8).',
+  S2c:'O verde some; entram as projeções laranja e (4, 4).',
+  S3:'Raio refletido e herói até a Colisão.',
+  S5:'A linha "8 min-luz" gira até t_H = 0.',
+  R:'Boost de Lorentz contínuo até o referencial do herói.',
+};
+const PREV = {S1:'S0',S2:'S1',S2b:'S2',S2c:'S2b',S3:'S2c',S5:'S3',R:'S3v'};
+
+const EQUATIONS = [
+  ['Parâmetros'],
+  ['Velocidade do herói','v','0,6','c'],
+  ['Distância até a Terra, medida na Terra','d','8','min-luz'],
+  ['Fator de Lorentz','\\gamma = \\frac{1}{\\sqrt{1 - v^2}}','1,25',''],
+  ['Eventos na Terra'],
+  ['Reflexão na Terra: posição','x_T = d','8','min-luz'],
+  ['Colisão na Terra: instante','t_T = \\frac{2d}{1 + v}','10','min'],
+  ['Colisão na Terra: posição','x_T = v\\,t_T','6','min-luz'],
+  ['Transformações de Lorentz'],
+  ['Reflexão no herói: posição','x_H = \\gamma\\,(x_T - v\\,t_T)','4','min-luz'],
+  ['Reflexão no herói: instante','t_H = \\gamma\\,(t_T - v\\,x_T)','4','min'],
+  ['Colisão no herói: posição','x_H = \\gamma\\,(x_T - v\\,t_T)','0','min-luz'],
+  ['Colisão no herói: instante','t_H = \\gamma\\,(t_T - v\\,x_T)','8','min'],
+  ['Intervalo invariante'],
+  ['Emissão → Reflexão (tipo luz)','s^2 = c^2\\Delta t^2 - \\Delta x^2','0','min²'],
+];
+
+const FILES = {
+  'cenas.py':{lang:'python', ic:'🐍', code:
+`class S1_EixosHeroi(Base):
+    def construct(self):
+        E = self.E
+        self.add(*E.s0())
+        # a velocidade dos eixos vai de 0 a 0,6, e a grade e os eixos são redesenhados a cada quadro
+        v = ValueTracker(0)
+        grade = always_redraw(lambda: E.D.grade_heroi(v.get_value()))
+        eixos = always_redraw(lambda: E.D.eixos_heroi(v.get_value(), numeros=False))
+        self.wait(0.2)
+        self.play(FadeIn(grade), FadeIn(eixos), run_time=0.5)
+        self.bring_to_front(E.terra, E.heroi)
+        # mais devagar, a pedido: 2,5 s → 4,5 s
+        self.play(v.animate.set_value(V), run_time=4.5, rate_func=smooth)
+        grade.clear_updaters()
+        self.remove(eixos)
+        self.add(*E.s1())  # reordena as camadas como no S1, com a grade atrás
+        self.play(FadeOut(grade), run_time=0.6)
+        self.wait(0.3)
+
+
+class S2_Reflexao(Base):
+    def construct(self):
+        E = self.E
+        self.add(*E.s1())
+        self.wait(0.3)
+        self.play(
+            FadeIn(E.pontos["Emissão"], scale=2),
+            Flash(E.D.p(0, 0), color=COR_LUZ, line_length=0.25, flash_radius=0.2),
+            FadeIn(E.nome("Emissão")),
+            FadeIn(E.coords("Emissão")),
+            run_time=0.6,
+        )`},
+  'fisica.py':{lang:'python', ic:'🐍', code:
+`V = 0.6          # velocidade do herói, em c
+DIST = 8         # distância até a Terra, em min-luz, medida na Terra
+GAMMA = 1 / (1 - V**2) ** 0.5
+
+
+def lorentz(x, t, v=V):
+    """Coordenadas da Terra -> coordenadas do herói."""
+    g = gamma(v)
+    return g * (x - v * t), g * (t - v * x)
+
+
+def equacoes():
+    """Todas as contas da aula, na ordem da apresentação."""
+    t_colisao = 2 * DIST / (1 + V)
+    ...`},
+  'plano.yaml':{lang:'yaml', ic:'📋', code:
+`estados:
+  - id: S0
+    titulo: Diagrama da Terra
+    visivel: Eixos da Terra, a linha da Terra em x = 8 e o herói na origem.
+    cena: S0_Base
+
+  - id: S1
+    titulo: Eixos do herói
+    visivel: Os eixos oblíquos do herói, já em v = 0,6, sobre os eixos da Terra.
+    cena: S1_EixosHeroi
+
+transicoes:
+  - de: S0
+    para: S1
+    descricao: A grade e os eixos do herói aparecem e se fecham de v = 0 até 0,6.
+    duracao: 6
+    cena: S1_EixosHeroi`},
+  'CONTEXTO.md':{lang:'markdown', ic:'📝', code:
+`# Contexto da aula
+
+A disciplina é Introdução à Teoria da Relatividade, do 6º semestre.
+A entrega é uma apresentação de 10 minutos em PowerPoint.
+
+## Decisões
+- Nada de equações dentro do diagrama: elas ficam no slide.
+- Transição S0 → S1 com 6 s (pedido do professor em 13/11).`},
+  'test_fisica.py':{lang:'python', ic:'🧪', code:
+`from fisica import equacoes
+
+def test_colisao_no_heroi():
+    eq = {e.nome: e.valor for e in equacoes()}
+    assert eq["Colisão no herói: instante"] == pytest.approx(8)`},
+};
+
+// ═════════════════════════════════════════════════════════════
+//  Fake Manim render: a Minkowski diagram drawn in SVG
+// ═════════════════════════════════════════════════════════════
+const C = {ink:'#1a1a1a', blue:'#1f6fb2', orange:'#d9480f', dorange:'#9a3412', gold:'#b8860b', green:'#2b8a3e', grid:'#e8e8e8'};
+function diagram(id, p=1, opts={}){
+  const idx = id==='S3v' ? ORDER.indexOf('S3') : ORDER.indexOf(id);
+  const at = s => idx >= ORDER.indexOf(s);
+  const only = s => id===s;
+  const boost = id==='R' ? 0.6*ease(p) : 0;
+  const g = 1/Math.sqrt(1-boost*boost);
+  const T = (x,t) => boost ? [g*(x-boost*t), g*(t-boost*x)] : [x,t];
+  const X = x => 230 + x*30, Y = t => 335 - t*28;
+  const P = (x,t) => { const [a,b]=T(x,t); return [X(a),Y(b)]; };
+  const fresh = s => id===s && !opts.still ? ease(p) : 1;      // reveal factor for the state just entered
+  let o = '';
+  const line = (x1,t1,x2,t2,col,w=2,f=1,dash='') => { const [a,b]=P(x1,t1), [c,d]=P(x1+(x2-x1)*f, t1+(t2-t1)*f);
+    o += `<line x1="${a}" y1="${b}" x2="${c}" y2="${d}" stroke="${col}" stroke-width="${w}" ${dash?`stroke-dasharray="${dash}"`:''} stroke-linecap="round"/>`; };
+  const dot = (x,t,col,r=5,f=1) => { if(f<.05) return; const [a,b]=P(x,t); o += `<circle cx="${a}" cy="${b}" r="${r*f}" fill="${col}"/>`; };
+  const txt = (x,t,s,col,dx=8,dy=-8,f=1,size=15) => { if(f<.3) return; const [a,b]=P(x,t); o += `<text x="${a+dx}" y="${b+dy}" fill="${col}" font-size="${size}" font-family="Georgia,serif" opacity="${f}">${s}</text>`; };
+  // grid
+  for(let i=-8;i<=16;i++){ o+=`<line x1="${X(i)}" y1="0" x2="${X(i)}" y2="360" stroke="${C.grid}" stroke-width="1"/>`; }
+  for(let i=-2;i<=14;i++){ o+=`<line x1="0" y1="${Y(i)}" x2="640" y2="${Y(i)}" stroke="${C.grid}" stroke-width="1"/>`; }
+  // Earth axes + Earth worldline + hero
+  line(-1,0,11,0,C.blue,2); line(0,-1,0,11.5,C.blue,2);
+  txt(11,0,'x<tspan font-size="11">T</tspan>',C.blue,4,18); txt(0,11.5,'ct<tspan font-size="11">T</tspan>',C.blue,-34,10);
+  line(8,-1,8,11.5,C.blue,3); txt(8,11,'Terra',C.blue,8,10,1,13);
+  // hero axes
+  if(at('S1')){ const v = id==='S1' && !opts.still ? 0.6*ease(p) : 0.6;
+    line(0,0,11*v,11,C.orange,2); line(0,0,11,11*v,C.orange,2);
+    txt(11*v,11,'ct<tspan font-size="11">H</tspan>',C.orange,6,6); txt(11,11*v,'x<tspan font-size="11">H</tspan>',C.orange,4,18); }
+  // reflection
+  if(at('S2')){ const f = fresh('S2');
+    line(0,0,8,8,C.gold,4,f); line(0,0,4.8,8,C.dorange,3,f);
+    dot(0,0,C.ink,5); dot(8,8,C.ink,5,f>.98?1:0); txt(8,8,'(8, 8)',C.blue,10,4,f>.98?1:0); }
+  if(only('S2b')){ const f = fresh('S2b');
+    line(8,8,4.8,8,C.green,2.5,f,'6 5'); line(4.8,8,4.8,0,C.green,2.5,f,'6 5'); dot(4.8,8,C.green,5,f);
+    txt(4.8,8,'6,4',C.green,-30,-8,f); txt(4.8,0,'4,8',C.green,-12,20,f); }
+  if(at('S2c') && id!=='R'){ const f = fresh('S2c');
+    line(8,8,3,5,C.orange,2,f,'6 5'); line(8,8,5,3,C.orange,2,f,'6 5'); txt(8,8,'(4, 4)',C.orange,10,24,f); }
+  if(at('S3')){ const f = id==='S3' ? fresh('S3') : 1;
+    line(8,8,6,10,C.gold,4,f); line(4.8,8,6,10,C.dorange,3,f); dot(6,10,C.ink,5,f>.98?1:0);
+    txt(6,10,'Colisão',C.ink,-70,-8,f>.98?1:0,14); if(!boost) txt(6,10,'(6, 10)',C.blue,10,4,f>.98?1:0); }
+  if(only('S5')){ const f = fresh('S5'); line(0,0,8,4.8,C.green,3,f); txt(8,4.8,'t<tspan font-size="11">T</tspan> = 4,8',C.green,8,4,f); }
+  if(id==='R' && p>.9){ txt(0,8,'(0, 8)',C.orange,10,4); txt(4,4,'(4, 4)',C.green,10,4); }
+  return `<svg viewBox="0 0 640 360" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg"><rect width="640" height="360" fill="#fff"/>${o}</svg>`;
+}
+function ease(t){ return t<.5 ? 2*t*t : 1-Math.pow(-2*t+2,2)/2; }
+
+// ═════════════════════════════════════════════════════════════
+//  Courses and lessons
+// ═════════════════════════════════════════════════════════════
+const STATUS = {
+  plan:{c:'#d97706', bg:'#fff4df', t:'Plano para aprovar'},
+  rendering:{c:'#2563eb', bg:'#e8f0ff', t:'Renderizando 3/5'},
+  ready:{c:'#16a34a', bg:'#e6f7ec', t:'Pronta'},
+  exported:{c:'#0d9488', bg:'#e0f4f2', t:'Exportada'},
+};
+const PROJECTS = [
+  {id:'rel', name:'Relatividade Restrita', sub:'Insper · 6º semestre', icon:'γ', bg:'#e7effc', fg:'#1d64d8',
+   instr:'Notação das aulas: c = 1, S = Terra (x_T, t_T), S\' = herói (x_H, t_H). Vírgula decimal. Nada de equações dentro do diagrama: elas ficam no slide.',
+   lessons:[
+    {id:'a09', name:'Aula 09 · Diagrama de Minkowski', short:'Minkowski', when:'ontem', status:'ready', n:'9 estados', thumb:'S3'},
+    {id:'a10', name:'Aula 10 · Paradoxo dos gêmeos', short:'Gêmeos', when:'3 dias', status:'plan', n:'4 estados', thumb:null},
+    {id:'a11', name:'Aula 11 · Contração do comprimento', short:'Contração', when:'agora', status:'rendering', n:'5 estados', thumb:'R'},
+  ]},
+  {id:'mec', name:'Física 1 · Mecânica', sub:'1º semestre', icon:'↗︎', bg:'#e7f7ee', fg:'#16a34a',
+   instr:'Gravidade 9,8 m/s². Vetores com seta cheia. Mostrar sempre a escala.',
+   lessons:[
+    {id:'m01', name:'Lançamento oblíquo', short:'Lançamento', when:'2 semanas', status:'ready', n:'3 estados', thumb:'proj'},
+    {id:'m02', name:'Plano inclinado', short:'Plano inclinado', when:'1 mês', status:'exported', n:'4 estados', thumb:'ramp'},
+  ]},
+  {id:'ele', name:'Eletromagnetismo', sub:'4º semestre', icon:'∮', bg:'#fff1e7', fg:'#ea580c', instr:'', lessons:[]},
+];
+const EXAMPLE = {id:'ex', name:'Exemplo · Relatividade: herói e espelho', short:'Exemplo', status:'ready', thumb:'R'};
+const TWINS = [['A0','Partida','As duas linhas de mundo na Terra, a estrela em x = 4.'],['A1','Ida','A irmã até a estrela; linhas de simultaneidade dela em azul.','4 s'],['A2','Virada','As linhas de simultaneidade trocam de inclinação.','3 s'],['A3','Reencontro','A irmã volta; 10 anos na Terra, 6 para ela.','4 s']];
+
+function thumb(l){
+  if(!l.thumb) return `<div class="ph" style="display:grid;place-items:center;background:#f4f6f9;color:var(--faint);font-size:12px">sem prévia ainda</div>`;
+  if(l.thumb==='proj') return `<svg viewBox="0 0 640 360"><rect width="640" height="360" fill="#fff"/><line x1="40" y1="320" x2="600" y2="320" stroke="#1a1a1a" stroke-width="2"/><path d="M60 320 Q 320 -40 580 320" fill="none" stroke="#1f6fb2" stroke-width="4" stroke-dasharray="10 8"/><circle cx="200" cy="148" r="12" fill="#d9480f"/><line x1="200" y1="148" x2="290" y2="148" stroke="#2b8a3e" stroke-width="4"/><line x1="200" y1="148" x2="200" y2="90" stroke="#2b8a3e" stroke-width="4"/><text x="296" y="154" font-size="22" fill="#2b8a3e" font-family="Georgia">vx</text><text x="186" y="80" font-size="22" fill="#2b8a3e" font-family="Georgia">vy</text></svg>`;
+  if(l.thumb==='ramp') return `<svg viewBox="0 0 640 360"><rect width="640" height="360" fill="#fff"/><path d="M80 320 L560 320 L560 110 Z" fill="#f3f3f3" stroke="#1a1a1a" stroke-width="2"/><g transform="rotate(-23.6 330 220)"><rect x="290" y="180" width="80" height="50" fill="#1f6fb2"/></g><line x1="330" y1="205" x2="330" y2="300" stroke="#d9480f" stroke-width="4"/><line x1="330" y1="205" x2="290" y2="115" stroke="#2b8a3e" stroke-width="4"/><text x="338" y="296" font-size="22" fill="#d9480f" font-family="Georgia">P</text><text x="264" y="112" font-size="22" fill="#2b8a3e" font-family="Georgia">N</text></svg>`;
+  return diagram(l.thumb,1,{still:true});
+}
+
+// ═════════════════════════════════════════════════════════════
+//  State
+// ═════════════════════════════════════════════════════════════
+const params = new URLSearchParams(location.search);
+const VARIANTS = {F:'Final (A + B)', C:'Colorido'};
+const S = {
+  variant: params.get('variant')==='F' ? 'F' : 'C',
+  view:'lesson', project:'rel', lesson:'a09',
+  chatW: 400, ws: true, wsTab:'preview',
+  state:'S3', playing:null, progress:1,
+  file:'cenas.py', dirty:false, mode:'rapido',
+  planApproved:{a10:false}, projTab:'aulas', exportTab:'nova',
+  open:{rel:true, mec:false, ele:false},
+  pins:[{state:'S3', x:61, y:13, text:'Baixe um pouco este rótulo', done:true}],
+  pinMode:false, draft:null, pending:[],
+  extra:[],
+};
+const proj = () => PROJECTS.find(p=>p.id===S.project);
+const lesson = () => S.lesson==='ex' ? EXAMPLE : proj()?.lessons.find(l=>l.id===S.lesson);
+const isC = () => S.variant==='C';
+function go(patch){ Object.assign(S, patch); render(); }
+const fmt = n => String(n).replace('.',',');
+
+// ═════════════════════════════════════════════════════════════
+//  Sidebars
+// ═════════════════════════════════════════════════════════════
+function usageCard(){
+  return `<div class="usage" onclick="openSettings('uso')"><div class="row"><span class="grow">Uso do ChatGPT Plus</span><span class="faint">42%</span></div><div class="bar"><i style="width:42%"></i></div><div class="faint" style="margin-top:4px">Renova em 2 h 10 min</div></div>
+    <button class="me" onclick="openSettings('conta')"><div class="avatar">PR</div><div class="grow" style="text-align:left"><div>Professor</div><div class="faint small">ChatGPT Plus</div></div><span class="faint">⚙</span></button>`;
+}
+// F: round-1 sidebar (ChatGPT-like: new, search, courses with lessons nested)
+function sidebarF(){
+  return `<aside class="side">
+    <div class="top"><div class="row"><div class="logo">M</div><b>ManimFlow</b></div></div>
+    <button class="nav" onclick="go({view:'home'})"><span class="ic">✎</span>Nova aula</button>
+    <button class="nav" onclick="openSearch()"><span class="ic">⌕</span>Buscar aulas</button>
+    <div class="sidescroll">
+      <div class="sec">Turmas</div>
+      <button class="nav" onclick="openNewProject()"><span class="ic">＋</span>Nova turma</button>
+      ${PROJECTS.map(p=>`
+        <button class="nav ${S.view==='project'&&S.project===p.id?'on':''}" onclick="go({view:'project',project:'${p.id}'})"><span class="ic" style="color:${p.fg}">${p.icon}</span><span class="ellipsis">${p.name}</span></button>
+        ${S.project===p.id ? `<div class="sub">${p.lessons.map(l=>`<button class="nav ${S.view==='lesson'&&S.lesson===l.id?'on':''}" onclick="openLesson('${p.id}','${l.id}')"><span class="ellipsis">${l.name}</span></button>`).join('')}</div>`:''}`).join('')}
+      <div class="sec">Exemplo</div>
+      <button class="nav ${S.lesson==='ex'&&S.view==='lesson'?'on':''}" onclick="openLesson('rel','ex')"><span class="ic">★</span><span class="ellipsis">${EXAMPLE.name}</span></button>
+    </div>${usageCard()}</aside>`;
+}
+// C: the sidebar is a map of the teacher's work, not a chat history
+function statusDot(l){ const s=STATUS[l.status]; return l.status==='rendering' ? `<span class="spin" style="width:10px;height:10px;border-width:2px"></span>` : `<span class="dot" style="background:${s.c};margin-top:0"></span>`; }
+function sidebarC(){
+  const inbox = [
+    {c:STATUS.plan.c, t:'Aprovar o plano', s:'Relatividade · Gêmeos', on:`openLesson('rel','a10')`},
+    {c:STATUS.rendering.c, t:'Renderizando 3 de 5', s:'Relatividade · Contração', on:`openLesson('rel','a11')`, spin:true},
+    {c:STATUS.exported.c, t:'Exportação pronta', s:'Mecânica · Plano inclinado', on:`exportDone('Plano inclinado')`},
+  ];
+  return `<aside class="side">
+    <div class="top"><div class="row"><div class="logo">M</div><b>ManimFlow</b></div><button class="iconbtn" title="Configurações" onclick="openSettings('conta')">⚙</button></div>
+    <button class="newbtn" onclick="go({view:'home'})">＋ Nova aula</button>
+    <button class="searchbtn" onclick="openPalette()"><span>⌕</span><span class="grow" style="text-align:left">Buscar ou fazer algo…</span><kbd>Ctrl K</kbd></button>
+    <div class="sidescroll">
+      <div class="sec">Precisa de você <span class="count hot">${inbox.length}</span></div>
+      ${inbox.map(i=>`<button class="inbox" onclick="${i.on}">${i.spin?'<span class="spin" style="margin-top:3px;width:10px;height:10px"></span>':`<span class="dot" style="background:${i.c}"></span>`}<div class="grow"><div>${i.t}</div><div class="faint small ellipsis">${i.s}</div></div></button>`).join('')}
+      <div class="sec">Turmas<span class="grow"></span><button class="iconbtn" style="width:22px;height:22px" title="Nova turma" onclick="openNewProject()">＋</button></div>
+      ${PROJECTS.map(p=>`
+        <div class="trow ${S.view==='project'&&S.project===p.id?'on':''}" onclick="go({view:'project',project:'${p.id}'})">
+          <span class="chev ${S.open[p.id]?'open':''}" onclick="event.stopPropagation();S.open['${p.id}']=!S.open['${p.id}'];render()">▶</span>
+          <span class="tsq" style="background:${p.bg};color:${p.fg}">${p.icon}</span>
+          <span class="grow ellipsis">${p.name}</span><span class="count hide-on-hover">${p.lessons.length}</span>
+          <span class="qa"><button title="Nova aula nesta turma" onclick="event.stopPropagation();newLessonIn('${p.id}')">＋</button><button title="Instruções da turma" onclick="event.stopPropagation();go({view:'project',project:'${p.id}',projTab:'instr'})">✎</button><button title="Mais" onclick="event.stopPropagation();turmaMenu(event,'${p.id}')">⋯</button></span>
+        </div>
+        ${S.open[p.id] ? p.lessons.map(l=>`
+          <div class="lrowS ${S.view==='lesson'&&S.lesson===l.id?'on':''}" onclick="openLesson('${p.id}','${l.id}')" title="${STATUS[l.status].t}">
+            ${statusDot(l)}<span class="grow ellipsis">${l.short}</span>
+            <span class="qa"><button title="Ver prévia" onclick="event.stopPropagation();openLesson('${p.id}','${l.id}')">▶</button><button title="Exportar" onclick="event.stopPropagation();openLesson('${p.id}','${l.id}');openExport()">⇩</button><button title="Mais" onclick="event.stopPropagation();lessonMenu(event)">⋯</button></span>
+          </div>`).join('') + (p.lessons.length?'':`<div class="lrowS faint" onclick="newLessonIn('${p.id}')">＋ Primeira aula</div>`) : ''}`).join('')}
+      <div class="sec">Exemplo</div>
+      <div class="lrowS ${S.lesson==='ex'&&S.view==='lesson'?'on':''}" style="padding-left:10px" onclick="openLesson('rel','ex')"><span class="tsq" style="background:#fff6d6;color:#b8860b">★</span><span class="grow ellipsis">Herói e espelho</span></div>
+    </div>${usageCard()}</aside>`;
+}
+
+// ═════════════════════════════════════════════════════════════
+//  Composer
+// ═════════════════════════════════════════════════════════════
+function composer(placeholder, opts={}){
+  const l = lesson();
+  const approve = isC() && S.view==='lesson' && S.lesson==='a10' && !S.planApproved.a10;
+  const pend = isC() && S.pending.length ? `<div class="attach">${S.pending.map((p,i)=>`<span class="chip">📍 ${p.state} · ${p.text} <button onclick="S.pending.splice(${i},1);S.pins=S.pins.filter(x=>x!==S.pending[${i}]);render()">✕</button></span>`).join('')}</div>` : '';
+  return `${opts.suggest && isC() && !approve ? `<div class="suggest">${['🐢 Mais devagar','🔠 Rótulos maiores','🎨 Trocar as cores','＋ Mais um estado','⬛ Fundo preto para projetor'].map(s=>`<button class="chip" onclick="send('${s.slice(2).trim()}')">${s}</button>`).join('')}</div>`:''}
+  <div class="composer">
+    ${approve?`<div class="approvebar">⏳ <span class="grow">O plano está esperando você.</span><button class="btn sm" onclick="go({wsTab:'plan',ws:true})">Ver plano</button><button class="btn sm primary" onclick="approve()">Aprovar plano</button></div>`:''}
+    ${pend}
+    <textarea rows="${opts.big?2:1}" placeholder="${placeholder}" id="msg" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();send()}"></textarea>
+    <div class="tools">
+      <button class="iconbtn" title="Anexar imagem ou PDF">＋</button>
+      ${opts.turma? turmaPicker():''}
+      <button class="chip ${S.mode==='rapido'?'on':''}" onclick="go({mode:'rapido'})">⚡ Rápido</button>
+      <button class="chip ${S.mode==='capricho'?'on':''}" onclick="go({mode:'capricho'})">✦ Caprichado</button>
+      <span class="grow"></span>
+      <button class="send" onclick="send()">↑</button>
+    </div></div>`;
+}
+function turmaPicker(){ const p=proj(); return `<button class="chip" style="background:${p.bg};color:${p.fg};border-color:transparent" onclick="pickTurma(event)">${p.icon} ${p.name} ▾</button>`; }
+
+// ═════════════════════════════════════════════════════════════
+//  Home
+// ═════════════════════════════════════════════════════════════
+function turmaCard(p){
+  return `<div class="gcard" onclick="go({view:'project',project:'${p.id}'})">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line);border-bottom:1px solid var(--line)">
+      ${[0,1,2,3].map(i=>{const l=p.lessons[i]; return l?`<div style="aspect-ratio:16/9;overflow:hidden">${thumb(l).replace('class="ph"','class="ph" style="border:0"')}</div>`:`<div style="background:${p.bg};aspect-ratio:16/9"></div>`}).join('')}
+    </div>
+    <div class="b"><div class="row"><span class="tsq" style="background:${p.bg};color:${p.fg}">${p.icon}</span><b class="ellipsis">${p.name}</b></div>
+    <div class="faint small" style="margin-top:4px">${p.sub} · ${p.lessons.length} aulas</div></div></div>`;
+}
+function homeF(){
+  return `<div class="topbar"></div><div class="center"><div style="max-width:1000px;margin:0 auto;padding:9vh 28px 80px">
+    <h1 style="text-align:center;font-weight:500;font-size:28px;margin:0 0 24px">O que vamos animar hoje?</h1>
+    <div style="max-width:720px;margin:0 auto">${composer('Descreva a animação da próxima aula…',{big:true,turma:true})}</div>
+    <div class="row" style="justify-content:space-between;margin:48px 0 12px"><b>Suas turmas</b><button class="btn sm" onclick="openNewProject()">＋ Nova turma</button></div>
+    <div class="grid">${PROJECTS.map(turmaCard).join('')}</div>
+    <div class="todo" style="margin-top:16px" onclick="openLesson('rel','ex')"><div style="width:110px;flex:none;border-radius:8px;overflow:hidden;border:1px solid var(--line)">${diagram('R',1,{still:true})}</div><div class="grow"><b>${EXAMPLE.name}</b><div class="muted small">Uma aula pronta para explorar. Suas mudanças ficam numa cópia.</div></div><button class="btn sm">Abrir</button></div>
+  </div></div>`;
+}
+function homeC(){
+  const todo = [
+    {c:STATUS.plan, t:'O plano dos Gêmeos espera sua aprovação', s:'Relatividade Restrita · 4 estados', b:'Ver plano', on:`openLesson('rel','a10')`},
+    {c:STATUS.rendering, t:'Contração do comprimento está renderizando', s:'3 de 5 cenas · uns 40 s', b:'Acompanhar', on:`openLesson('rel','a11')`},
+    {c:STATUS.exported, t:'Plano inclinado foi exportado para PowerPoint', s:'Física 1 · Mecânica · hoje 09:12', b:'Abrir pasta', on:`exportDone('Plano inclinado')`},
+  ];
+  return `<div class="topbar"></div><div class="center"><div style="max-width:1000px;margin:0 auto;padding:5vh 28px 80px;position:relative">
+    <h1 style="text-align:center;font-weight:500;font-size:28px;margin:0 0 6px;position:relative">Boa tarde, professor</h1>
+    <div class="muted" style="text-align:center;margin-bottom:22px;position:relative">Descreva a animação e escolha a turma. O agente monta o plano antes de escrever código.</div>
+    <div style="max-width:720px;margin:0 auto;position:relative">${composer('Ex.: uma onda estacionária numa corda com 3 harmônicos…',{big:true,turma:true})}</div>
+    <div class="group" style="margin-top:40px">Precisa de você <span class="count hot">${todo.length}</span></div>
+    <div class="col" style="gap:8px">${todo.map(t=>`<div class="todo" onclick="${t.on}"><span class="tsq" style="background:${t.c.bg};color:${t.c.c};width:32px;height:32px;border-radius:10px">${t.c===STATUS.rendering?'<span class="spin"></span>':'●'}</span><div class="grow"><b>${t.t}</b><div class="muted small">${t.s}</div></div><button class="btn sm">${t.b}</button></div>`).join('')}</div>
+    <div class="group" style="margin-top:28px">Continuar de onde parou</div>
+    <div class="grid">${PROJECTS.flatMap(p=>p.lessons.map(l=>({p,l}))).slice(0,4).map(({p,l})=>lessonCard(p,l)).join('')}</div>
+    <div class="row" style="justify-content:space-between;margin:28px 0 10px"><b>Turmas</b><button class="btn sm" onclick="openNewProject()">＋ Nova turma</button></div>
+    <div class="grid">${PROJECTS.map(turmaCard).join('')}</div>
+  </div></div>`;
+}
+
+// ═════════════════════════════════════════════════════════════
+//  Course page (Turma) — B's layout; C adds a color band, status groups, quick actions
+// ═════════════════════════════════════════════════════════════
+function lessonCard(p,l){
+  const s = STATUS[l.status];
+  return `<div class="gcard" onclick="openLesson('${p.id}','${l.id}')">${thumb(l)}
+    ${isC()?`<div class="hover"><button onclick="event.stopPropagation();openLesson('${p.id}','${l.id}')">▶ Prévia</button><button onclick="event.stopPropagation();openLesson('${p.id}','${l.id}');openExport()">⇩</button><button onclick="event.stopPropagation();lessonMenu(event)">⋯</button></div>`:''}
+    <div class="b"><b class="ellipsis" style="display:block">${l.name}</b><div class="row" style="margin-top:6px"><span class="pill" style="background:${s.bg};color:${s.c}">${l.status==='rendering'?'<span class="spin" style="width:9px;height:9px"></span>':'●'} ${s.t}</span><span class="grow"></span><span class="faint small">${l.when}</span></div>
+    ${isC()?`<div class="faint small" style="margin-top:4px">${p.name}</div>`:''}</div></div>`;
+}
+function instrColumn(p){
+  return `<div class="instr"><h5>Instruções da turma</h5><div class="muted">${p.instr||'<span class="faint">Nenhuma ainda. O agente segue estas regras em todas as aulas desta turma.</span>'}</div><button class="btn sm" style="margin-top:10px">Editar</button></div>
+    <div class="instr"><h5>Perfil do professor <span class="faint small">· vale para todas as turmas</span></h5><div class="muted">Fundo branco, paleta com contraste medido, vírgula decimal, 1080p60, 16:9.</div><button class="btn sm" style="margin-top:10px" onclick="openSettings('perfil')">Abrir perfil</button></div>
+    <div class="instr"><h5>Arquivos de referência</h5><div class="row" style="margin-top:6px"><span class="tag" style="background:#fdeee6;color:#d9480f;border:0">PDF</span> <span class="ellipsis">Notas de aula — Cap. 3.pdf</span></div><button class="btn sm" style="margin-top:10px">＋ Adicionar arquivo</button></div>`;
+}
+function projectF(){
+  const p = proj();
+  return `<div class="topbar"><button class="crumb">${p.name} ▾</button><span class="grow"></span><button class="btn primary" onclick="newLessonIn('${p.id}')">＋ Nova aula</button></div>
+  <div class="center"><div style="max-width:1100px;margin:0 auto;padding:16px 28px 80px">
+    <div class="ptitle"><span class="picon" style="background:${p.bg};color:${p.fg}">${p.icon}</span>${p.name}</div>
+    <div class="muted" style="margin:2px 0 20px 48px">${p.sub}</div>
+    <div style="display:grid;grid-template-columns:1fr 300px;gap:24px;align-items:start">
+      <div class="grid"><div class="newcard" onclick="newLessonIn('${p.id}')"><div style="text-align:center"><div style="font-size:26px">＋</div>Nova aula</div></div>${p.lessons.map(l=>lessonCard(p,l)).join('')}</div>
+      <div>${instrColumn(p)}</div></div></div></div>`;
+}
+function projectC(){
+  const p = proj(), L = p.lessons;
+  const groups = [['Precisa de você',L.filter(l=>l.status==='plan'),STATUS.plan.c],['Em produção',L.filter(l=>l.status==='rendering'),STATUS.rendering.c],['Prontas para a aula',L.filter(l=>l.status==='ready'||l.status==='exported'),STATUS.ready.c]].filter(g=>g[1].length);
+  const tabs = [['aulas','Aulas'],['instr','Instruções e arquivos'],['exp','Exportações']];
+  return `<div class="topbar"><span class="grow"></span><button class="btn" onclick="openPalette()">⌕ Buscar</button><button class="btn primary" onclick="newLessonIn('${p.id}')">＋ Nova aula</button></div>
+  <div class="center"><div style="max-width:1100px;margin:0 auto;padding:4px 28px 80px">
+    <div class="band" style="background:${p.bg}">
+      <div class="row" style="gap:14px"><span class="picon" style="background:#fff;color:${p.fg};width:48px;height:48px;font-size:24px;border-radius:14px">${p.icon}</span>
+        <div class="grow"><div style="font-size:26px;font-weight:600">${p.name}</div><div class="muted">${p.sub}</div></div>
+        <div class="stat"><b>${L.length}</b>aulas</div><div class="stat"><b>${L.filter(l=>l.status==='ready'||l.status==='exported').length}</b>prontas</div><div class="stat"><b>${L.filter(l=>l.status==='plan').length}</b>para aprovar</div></div>
+      <div style="margin-top:16px;max-width:700px">${composer('Nova aula em '+p.name+'…')}</div>
+    </div>
+    <div class="ltabs">${tabs.map(([k,t])=>`<button class="ltab ${S.projTab===k?'on':''}" onclick="go({projTab:'${k}'})">${t}</button>`).join('')}</div>
+    ${S.projTab==='aulas' ? (L.length ? groups.map(([t,ls,c])=>`<div class="group"><span class="dot" style="background:${c};margin:0"></span>${t} <span class="count">${ls.length}</span></div><div class="grid">${ls.map(l=>lessonCard(p,l)).join('')}</div>`).join('') + `<div class="grid" style="margin-top:16px"><div class="newcard" style="min-height:120px" onclick="newLessonIn('${p.id}')">＋ Nova aula</div></div>`
+        : `<div class="newcard" style="min-height:220px" onclick="newLessonIn('${p.id}')"><div style="text-align:center"><div style="font-size:30px">${p.icon}</div><b>Nenhuma aula ainda</b><div class="muted small">Escreva acima o que você quer animar.</div></div></div>`)
+     : S.projTab==='instr' ? `<div style="max-width:680px">${instrColumn(p)}</div>` : exportsList()}
+  </div></div>`;
+}
+function exportsList(){
+  return `<div class="col" style="gap:0;max-width:760px">${[['Aula 09 · Diagrama de Minkowski','PowerPoint','1080p60 · 9 PNG, 7 MP4','hoje 14:02'],['Aula 09 · Diagrama de Minkowski','Google Slides','GIF 720p','ontem'],['Aula 11 · Contração','Beamer / PDF','5 PNG','3 dias']].map(e=>`<div class="row" style="padding:12px 4px;border-bottom:1px solid var(--line)"><span class="tsq" style="background:#e0f4f2;color:#0d9488">⇩</span><div class="grow"><b>${e[0]}</b><div class="muted small">${e[1]} · ${e[2]}</div></div><span class="faint small">${e[3]}</span><button class="btn sm">Abrir pasta</button><button class="btn sm">Exportar de novo</button></div>`).join('')}</div>`;
+}
+
+// ═════════════════════════════════════════════════════════════
+//  The conversation (A's inline cards)
+// ═════════════════════════════════════════════════════════════
+function stepList(steps){
+  return `<ol>${steps.map(([st,label,cmd])=>`<li><span class="${st==='ok'?'ok':st==='bad'?'bad':'run'}">${st==='ok'?'✓':st==='bad'?'✕':'<span class="spin"></span>'}</span><div><div>${label}</div>${cmd?`<div class="cmd mono">${cmd}</div>`:''}</div></li>`).join('')}</ol>`;
+}
+function activity(summary, steps, open=false){ return `<details class="activity" ${open?'open':''}><summary><span class="ok">✓</span><span class="grow">${summary}</span><span class="faint">▾</span></summary>${stepList(steps)}</details>`; }
+function working(steps){ return `<details class="activity" open><summary><span class="spin"></span><span class="grow">Trabalhando…</span></summary>${stepList(steps)}</details>`; }
+function showWs(tab){ return `go({ws:true,wsTab:'${tab}'})`; }
+function planCard(){
+  const ids = ['S0','S1','S2','S3','S5','R'];
+  return `<div class="plan"><h4>Plano · ${ids.length} estados, ${ids.length-1} transições</h4>
+    ${ids.map((id,i)=>`${i?`<div class="trans">↓ ${TRANS[id]?fmt(TRANS[id]):'—'} s</div>`:''}<div class="st"><span class="tag">${id}</span><div><b>${STATES[id].t}</b>${STATES[id].c?`<div class="comment">💬 ${STATES[id].c}</div>`:''}</div><span></span></div>`).join('')}
+    <div class="row" style="justify-content:flex-end;margin-top:8px"><span class="pill" style="background:#e6f7ec;color:#16a34a">✓ Aprovado em 12/11</span></div></div>`;
+}
+function planCardTwins(){
+  const ok = S.planApproved.a10;
+  return `<div class="plan"><h4>Plano · 4 estados, 3 transições</h4>
+    ${TWINS.map((s,i)=>`${i?`<div class="trans">↓ ${s[3]}</div>`:''}<div class="st"><span class="tag">${s[0]}</span><div><b>${s[1]}</b><div class="muted small">${s[2]}</div></div><button class="faint small" title="Comentar">💬</button></div>`).join('')}
+    <div class="row" style="justify-content:flex-end;margin-top:8px">${ok?`<span class="pill" style="background:#e6f7ec;color:#16a34a">✓ Aprovado agora</span>`:`<button class="btn sm" onclick="${showWs('plan')}">Editar plano</button><button class="btn sm primary" onclick="approve()">Aprovar plano</button>`}</div></div>`;
+}
+function resultCard(){
+  return `<div class="result" onclick="${showWs('preview')}"><div class="strip">${['S0','S1','S2','S2b','S3','R'].map(id=>diagram(id,1,{still:true})).join('')}</div>
+    <div class="foot"><span>🎞</span><div class="grow"><b>Prévia · 9 estados, 7 transições</b><div class="faint small">480p. A final sai na exportação.</div></div><span class="btn sm">Abrir</span></div></div>`;
+}
+function changeCard(){
+  return `<div class="result" onclick="go({ws:true,wsTab:'code',file:'cenas.py'})"><div class="foot"><span>⟨⟩</span><div class="grow"><b>cenas.py</b> <span class="ok small">+2</span> <span class="bad small">−1</span> · <b>plano.yaml</b> <span class="ok small">+1</span> <span class="bad small">−1</span><div class="faint small">S0 → S1 agora dura 6 s.</div></div><span class="btn sm">Ver mudança</span></div></div>`;
+}
+function turnActions(version){
+  return `<div class="actions"><button title="Copiar">⧉</button><button title="Bom">👍</button><button title="Ruim">👎</button>${isC()?`<span class="grow"></span><span class="faint small">Versão salva · ${version}</span><button onclick="openVersions()">↺ Restaurar</button>`:''}</div>`;
+}
+function conversation(){
+  if(S.lesson==='a10') return `
+    <div class="msg-user">Aula sobre o paradoxo dos gêmeos. A irmã viaja a 0,8c até uma estrela a 4 anos-luz e volta. Quero ver as duas linhas de mundo e as linhas de simultaneidade trocando na virada.</div>
+    <div class="msg-agent">${activity('Leu o perfil e as instruções da turma · 4 s',[['ok','Leu perfil.md'],['ok','Leu as instruções de Relatividade Restrita'],['ok','Escreveu plano.yaml'],['ok','Validou o plano','manimflow plan validate .']])}
+      <p>Antes de escrever código, montei o plano. A virada tem uma transição só para ela, porque as linhas de simultaneidade precisam trocar devagar para a turma ver o "salto".</p>
+      ${planCardTwins()}</div>${extra()}`;
+  if(S.lesson==='a11') return `
+    <div class="msg-user">Agora a régua do herói vista da Terra, encolhendo conforme ele acelera.</div>
+    <div class="msg-agent">${working([['ok','Arquivo alterado: cenas.py'],['ok','Rodando os testes de física — 8 passaram'],['run','Renderizando a prévia — 3 de 5 cenas','manimflow preview . --all']])}</div>${extra()}`;
+  return `
+    <div class="msg-user">Quero uma aula sobre o diagrama de Minkowski: o herói sai da Terra a 0,6c, manda luz para um espelho a 8 min-luz e a gente acompanha as coordenadas nos dois referenciais.</div>
+    <div class="msg-agent">${activity('Leu o perfil e montou o plano · 12 s',[['ok','Leu perfil.md'],['ok','Escreveu plano.yaml'],['ok','Validou o plano','manimflow plan validate .']])}
+      <p>Montei o plano antes de escrever código. Cada estado é uma imagem do slide; cada seta é um vídeo curto entre duas imagens.</p>${planCard()}</div>
+    <div class="msg-user">Aprovado. Só deixa o rótulo da Colisão um pouco mais para baixo.</div>
+    <div class="msg-agent">${activity('Trabalhou por 2 min 14 s · 7 etapas',[['ok','Arquivo alterado: fisica.py'],['ok','Arquivo alterado: cenas.py'],['ok','Rodando os testes de física — 12 passaram','pytest test_fisica.py'],['ok','Renderizando a prévia — 9 cenas','manimflow preview . --all'],['ok','Extraindo os quadros','manimflow frames .'],['ok','Conferindo a continuidade — 7 de 7','manimflow check-continuity .'],['ok','Olhou 21 quadros']])}
+      <p>Pronto. As 7 transições passaram na conferência de continuidade, e baixei o rótulo "Colisão" para ele não encostar na borda.</p>${resultCard()}${turnActions('Primeira prévia')}</div>
+    ${isC()?`<div class="checkpoint">hoje</div>`:''}
+    <div class="msg-user">Mostre os eixos do herói se fechando mais devagar, uns 6 segundos.</div>
+    <div class="msg-agent">${activity('Trabalhou por 58 s · 2 tentativas',[['ok','Arquivo alterado: cenas.py'],['ok','Renderizando a prévia — S1_EixosHeroi'],['bad','Continuidade: o fim não bate com o S1 (0,4% dos pixels)','manimflow check-continuity . S1'],['ok','Arquivo alterado: cenas.py'],['ok','Conferindo a continuidade — ok']])}
+      <p>Mudei a transição S0 → S1 para 6 s. Na primeira tentativa a grade sumia um quadro tarde; corrigi e conferi de novo.</p>${changeCard()}${turnActions('Eixos mais devagar')}</div>
+    ${extra()}`;
+}
+function extra(){
+  return S.extra.map(m=> m.who==='me' ? `<div class="msg-user">${m.text}</div>` : `<div class="msg-agent">${m.done? activity(m.summary,m.steps) + `<p>${m.text}</p>` + turnActions('Sua última mudança') : working(m.steps)}</div>`).join('');
+}
+
+// ═════════════════════════════════════════════════════════════
+//  Workspace panels
+// ═════════════════════════════════════════════════════════════
+function stageHTML(){
+  const id = S.state, playing = S.playing;
+  const pins = !isC() ? '' : S.pins.filter(p=>p.state===id && !playing).map((p,i)=>`<div class="pin ${p.done?'done':''}" style="left:${p.x}%;top:${p.y}%" title="${p.text}">${p.done?'✓':S.pins.indexOf(p)+1}</div>`).join('');
+  const draft = S.draft ? `<div class="pin" style="left:${S.draft.x}%;top:${S.draft.y}%">＋</div><div class="pinbox" style="left:min(${S.draft.x}%, calc(100% - 250px));top:calc(${S.draft.y}% + 8px)" onclick="event.stopPropagation()"><input id="pinText" placeholder="O que mudar aqui?" onkeydown="if(event.key==='Enter')addPin();if(event.key==='Escape')go({draft:null})"><div class="row" style="justify-content:flex-end;margin-top:6px"><button class="btn sm ghost" onclick="go({draft:null})">Cancelar</button><button class="btn sm primary" onclick="addPin()">Comentar</button></div></div>` : '';
+  const rendering = S.lesson==='a11' ? `<div class="overlay"><span class="spin" style="width:22px;height:22px;border-width:3px"></span><div class="lines"><div>Desenhando a régua do herói</div><div class="now">Renderizando S3_Regua · 3 de 5</div><div>Depois: conferir a continuidade</div></div><div class="faint small">A prévia aparece aqui assim que ficar pronta.</div></div>` : '';
+  const empty = S.lesson==='a10' ? `<div class="overlay" style="background:#fafafa"><div style="font-size:28px">🗒</div><b>Ainda não há prévia</b><div class="muted small">O agente escreve o código depois que você aprovar o plano.</div><button class="btn sm primary" onclick="go({wsTab:'plan'})">Ver o plano</button></div>` : '';
+  return `<div class="stage ${S.pinMode?'pinning':''}" id="stage" onclick="stageClick(event)">${diagram(playing||id, playing?S.progress:1)}${pins}${draft}${rendering}${empty}</div>`;
+}
+function playerHTML(){
+  const id = S.state, playing = S.playing, canPlay = !!PREV[id];
+  const label = playing ? `${PREV[playing]} → ${playing} · ${fmt(TRANS[playing])} s` : `${id} · ${STATES[id].t}`;
+  return `<div class="player" style="width:min(100%, calc((100vh - 330px) * 1.7778))">
+    <button class="iconbtn" onclick="${canPlay?`play('${id}')`:''}" style="${canPlay?'':'opacity:.35'}" title="Tocar a transição que chega neste estado">${playing?'❚❚':'▶'}</button>
+    <div class="scrub"><i id="scrub" style="width:${(playing?S.progress:1)*100}%"></i></div>
+    <span class="small mono" style="min-width:140px;text-align:right">${label}</span>
+    ${isC()?`<button class="btn sm ${S.pinMode?'primary':''}" onclick="go({pinMode:!S.pinMode,draft:null})" title="Clique na imagem para apontar o que mudar">📍 ${S.pinMode?'Clique na imagem':'Comentar na imagem'}</button>`:''}
+  </div>`;
+}
+function filmstrip(){
+  return `<div class="film">${ORDER.map((s,i)=>`
+    ${i? (PREV[s]? `<div class="tpill ${S.playing===s?'on':''}" onclick="play('${s}')" title="${TRANS_DESC[s]}"><b>▶</b>${fmt(TRANS[s])} s</div>` : `<div class="tpill" title="Troca de slide sem vídeo"><b style="border-style:dashed">·</b>corte</div>`):''}
+    <div class="frame ${S.state===s&&!S.playing?'on':''}" onclick="go({state:'${s}',playing:null})">${diagram(s,1,{still:true})}<div class="cap"><span class="tag">${s}</span><span class="ellipsis muted">${STATES[s].t}</span></div></div>`).join('')}</div>`;
+}
+function previewF(){ return `<div style="padding:16px 20px 0">${stageHTML()}${playerHTML()}</div>${filmstrip()}`; }
+// C: vertical states rail (Synthesia scene list) + proportional timeline (Synthesia / Descript)
+const TRACK_COLORS = ['#dce7f9','#e3f6ea','#fff0e3','#e0f4f2','#eaeff6','#fff7d6','#e4f1fb'];
+function previewC(){
+  const rail = ORDER.map((s,i)=>`${i&&PREV[s]?`<button class="rtrans" onclick="play('${s}')">▶ ${fmt(TRANS[s])} s</button>`: i?`<div class="rtrans faint">— corte —</div>`:''}
+    <button class="rstate ${S.state===s&&!S.playing?'on':''}" onclick="go({state:'${s}',playing:null,draft:null})">${diagram(s,1,{still:true})}<div class="cap"><span class="tag">${s}</span><span class="ellipsis">${STATES[s].t}</span>${S.pins.some(p=>p.state===s&&!p.done)?'<span style="color:#f59f00">📍</span>':''}</div></button>`).join('');
+  let k=0; const total = ORDER.reduce((a,s)=>a+(TRANS[s]||0),0);
+  const track = ORDER.slice(1).map(s=> PREV[s]
+    ? `<div class="blk" style="flex:${TRANS[s]};background:${TRACK_COLORS[k++%TRACK_COLORS.length]}" onclick="play('${s}')" title="${TRANS_DESC[s]}">${S.playing===s?`<div class="fill" id="fill" style="width:${S.progress*100}%"></div>`:''}<span><b>${PREV[s]}→${s}</b></span><span class="muted">${fmt(TRANS[s])} s</span></div>`
+    : `<div class="blk cut" style="flex:.9" title="Troca de slide sem vídeo"><span>corte</span></div>`).join('');
+  return `<div class="pv"><div class="rail">${rail}</div>
+    <div class="stagecol">${stageHTML()}${playerHTML()}
+      <div style="width:min(100%, calc((100vh - 330px) * 1.7778));margin:0 auto">
+        <div class="ruler"><span>0 s</span><span>${fmt((total/2).toFixed(1))} s</span><span>${fmt(total.toFixed(1))} s</span></div>
+        <div class="track">${track}</div>
+        <div class="row" style="margin-top:12px"><b>${STATES[S.state].t}</b><span class="tag">${S.state}</span></div>
+        <div class="muted small">${STATES[S.state].v}</div>
+        ${S.pins.filter(p=>p.state===S.state).map(p=>`<div class="row small" style="margin-top:6px"><span class="pin ${p.done?'done':''}" style="position:static;margin:0;width:20px;height:20px;line-height:20px;font-size:10px">${p.done?'✓':S.pins.indexOf(p)+1}</span><span class="${p.done?'faint':''}">${p.text}</span>${p.done?'<span class="faint">· resolvido pelo agente</span>':'<span class="pill" style="background:#fff4df;color:#a35400">vai com a próxima mensagem</span>'}</div>`).join('')}
+      </div></div></div>`;
+}
+function codeBody(){
+  const f = FILES[S.file];
+  const html = window.hljs && f.lang!=='markdown' ? hljs.highlight(f.code,{language:f.lang}).value : f.code.replace(/</g,'&lt;');
+  return `<div class="code"><div class="files"><div class="faint small" style="padding:4px 8px 6px">${lesson().short}</div>${Object.keys(FILES).map(n=>`<button class="file ${n===S.file?'on':''}" onclick="go({file:'${n}'})"><span>${FILES[n].ic}</span>${n}</button>`).join('')}</div>
+    <div class="editor"><div class="edbar">${S.dirty?'<span class="dirty"></span>':''}<b>${S.file}</b><span class="faint ellipsis">${S.dirty?'Suas edições vão junto com a próxima mensagem.':'Você pode editar à mão.'}</span><span class="grow"></span><button class="btn sm" onclick="openVersions()">↺ Versões</button><button class="btn sm primary" onclick="go({dirty:false})">▶ Renderizar</button></div>
+      <pre contenteditable="true" spellcheck="false" oninput="S.dirty=true"><code class="hljs">${html}</code></pre></div></div>`;
+}
+function eqBody(){
+  return `<div>${EQUATIONS.map(e=> e.length===1 ? `<div class="eqh">${e[0]}</div>` : `<div class="eq"><div class="name">${e[0]}</div><div class="tex" data-tex="${e[1]}"></div><div class="val">= <b>${e[2]}</b> <span class="muted">${e[3]}</span></div></div>`).join('')}
+    <div class="faint small" style="padding:14px 16px 60px">Saem de <span class="mono">equacoes()</span> em fisica.py · ✓ 12 testes passaram.</div></div>`;
+}
+function planBoard(){
+  if(S.lesson==='a10'){ const ok=S.planApproved.a10;
+    return `<div class="row" style="padding:14px 16px 0"><b>Plano · Gêmeos</b><span class="faint small ellipsis">Edite o texto ou comente; vai tudo numa mensagem só.</span><span class="grow"></span><button class="btn sm">＋ Estado</button>${ok?'<span class="pill" style="background:#e6f7ec;color:#16a34a">✓ Aprovado</span>':'<button class="btn sm primary" onclick="approve()">Aprovar plano</button>'}</div>
+    <div class="cards">${TWINS.map((s,i)=>`${i?`<div class="parrow"><b style="color:var(--text)">→</b>${s[3]}</div>`:''}<div class="pcard"><div style="aspect-ratio:16/9;border:1.5px dashed var(--line);border-radius:6px;display:grid;place-items:center" class="faint small">${ok?'<span class="spin"></span>':'sem prévia'}</div><div class="row"><span class="tag">${s[0]}</span><b>${s[1]}</b></div><textarea>${s[2]}</textarea><button class="faint small" style="text-align:left">💬 Comentar</button></div>`).join('')}</div>`; }
+  const ids = ['S0','S1','S2','S2b','S2c','S3','S5','R'];
+  return `<div class="row" style="padding:14px 16px 0"><b>Plano</b><span class="faint small ellipsis">Edite o texto ou comente; o agente recebe tudo numa mensagem só.</span><span class="grow"></span><button class="btn sm">＋ Estado</button><button class="btn sm primary">Enviar ajustes</button></div>
+  <div class="cards">${ids.map((id,i)=>`${i?`<div class="parrow">${PREV[id]?`<b style="color:var(--text)">→</b>${fmt(TRANS[id])} s`:'corte'}</div>`:''}<div class="pcard">${diagram(id,1,{still:true})}<div class="row"><span class="tag">${id}</span><b class="ellipsis">${STATES[id].t}</b></div><textarea>${STATES[id].v}</textarea>${STATES[id].c?`<div class="comment">💬 ${STATES[id].c}</div>`:`<button class="faint small" style="text-align:left">💬 Comentar</button>`}</div>`).join('')}</div>`;
+}
+
+// ═════════════════════════════════════════════════════════════
+//  Lesson screen — chat | drag bar | workspace (closable)
+// ═════════════════════════════════════════════════════════════
+function lessonScreen(){
+  const p = proj(), l = lesson(), s = STATUS[l.status];
+  const top = `<div class="topbar lined">
+    ${S.lesson==='ex'?'':`<button class="crumb muted" onclick="go({view:'project'})">${isC()?`<span class="tsq" style="background:${p.bg};color:${p.fg};width:20px;height:20px;font-size:11px">${p.icon}</span>`:''}${p.name}</button><span class="faint">/</span>`}
+    <button class="crumb" onclick="lessonMenu(event)">${l.name} ▾</button>
+    ${isC()?`<span class="pill" style="background:${s.bg};color:${s.c}">${l.status==='rendering'?'<span class="spin" style="width:9px;height:9px"></span>':'●'} ${s.t}</span>`:''}
+    <span class="grow"></span>
+    ${S.ws?'':`<button class="btn" onclick="go({ws:true})">◧ Mostrar prévia</button>`}
+    <button class="btn ${isC()?'primary':''}" onclick="openExport()">⇩ Exportar</button>
+    <button class="iconbtn" onclick="lessonMenu(event)">⋯</button></div>`;
+  const chat = `<div class="chatcol ${S.ws?'':'full'}" id="chatcol" style="${S.ws?`width:${S.chatW}px`:''}">
+      <div class="row" style="padding:8px 12px 8px 16px;border-bottom:1px solid var(--line);flex:none"><b>Conversa</b><span class="grow"></span><button class="btn sm ghost" onclick="openThreads()">🕘 Anteriores</button><button class="btn sm ghost">＋ Nova</button></div>
+      <div class="thread" id="thread"><div class="thread-inner">${conversation()}</div></div>
+      <div class="composer-wrap" style="padding:0 12px 12px">${composer('Peça uma mudança…',{suggest:true})}</div></div>`;
+  const tabs = [['preview','Prévia'],['plan','Plano'],['code','Código'],['eq','Equações']];
+  const ws = S.ws ? `<div class="resizer" title="Arraste para mudar o tamanho · duplo clique volta ao padrão" onpointerdown="startResize(event)" ondblclick="go({chatW:400})"></div>
+    <div class="ws">
+      <div class="tabs">${tabs.map(([k,t])=>`<button class="tab ${S.wsTab===k?'on':''}" onclick="go({wsTab:'${k}',draft:null})">${t}</button>`).join('')}
+        <span class="grow"></span>
+        <span class="faint small ellipsis" style="margin-right:6px">${S.lesson==='a10'?'Plano aguardando aprovação':S.lesson==='a11'?'Renderizando…':'480p · há 2 min'}</span>
+        <button class="iconbtn" title="Prévia menor" onclick="go({chatW:Math.min(innerWidth-268-380,S.chatW+160)})">⊟</button>
+        <button class="iconbtn" title="Prévia maior" onclick="go({chatW:320})">⊞</button>
+        <button class="iconbtn" title="Fechar a prévia" onclick="go({ws:false,draft:null,pinMode:false})">✕</button></div>
+      <div class="pbody">${S.wsTab==='preview'?(isC()?previewC():previewF()):S.wsTab==='plan'?planBoard():S.wsTab==='code'?codeBody():eqBody()}</div></div>` : '';
+  return top + `<div class="content" id="split">${chat}${ws}</div>`;
+}
+function startResize(e){
+  e.preventDefault();
+  const split = document.getElementById('split'), col = document.getElementById('chatcol');
+  const left = split.getBoundingClientRect().left, max = split.getBoundingClientRect().width - 380;
+  document.body.classList.add('resizing');
+  const move = ev => { S.chatW = Math.max(300, Math.min(max, ev.clientX - left)); col.style.width = S.chatW+'px'; };
+  const up = () => { removeEventListener('pointermove',move); removeEventListener('pointerup',up); document.body.classList.remove('resizing'); render(); };
+  addEventListener('pointermove',move); addEventListener('pointerup',up);
+}
+
+// ═════════════════════════════════════════════════════════════
+//  Modals, menus, palette
+// ═════════════════════════════════════════════════════════════
+function modal(html, wide, top){ document.getElementById('modal').innerHTML = `<div class="scrim ${top?'top':''}" onclick="if(event.target===this)closeModal()"><div class="modal ${wide?'wide':''}">${html}</div></div>`; document.querySelector('#modal [autofocus]')?.focus(); }
+function closeModal(){ document.getElementById('modal').innerHTML=''; }
+const X_ = `<span class="grow"></span><button class="iconbtn" onclick="closeModal()">✕</button>`;
+function openNewProject(){
+  modal(`<div class="mhead">Nova turma${X_}</div><div class="mbody">
+    <input class="field" placeholder="Ex.: Física 2 · Ondas" autofocus>
+    <div class="row" style="flex-wrap:wrap">${['γ Física','∑ Matemática','⚗︎ Química','◎ Astronomia','… Outra'].map((c,i)=>`<button class="chip ${i===0?'on':''}">${c}</button>`).join('')}</div>
+    ${isC()?`<div class="row"><span class="small muted">Cor</span>${['#1d64d8','#16a34a','#ea580c','#0d9488','#0891b2','#ca8a04'].map((c,i)=>`<span style="width:22px;height:22px;border-radius:7px;background:${c};${i===0?'box-shadow:0 0 0 2px #fff,0 0 0 4px '+c:''}"></span>`).join('')}</div>`:''}
+    <textarea class="field" rows="3" placeholder="Instruções para o agente nesta turma (opcional). Ex.: notação, convenções, o que evitar."></textarea>
+    <div class="hint">💡 <span>Uma turma guarda as aulas de uma disciplina e as instruções que o agente segue em todas elas. As cores e fontes do seu perfil valem para todas as turmas.</span></div>
+    <div class="row" style="justify-content:flex-end"><button class="btn primary" onclick="closeModal()">Criar turma</button></div></div>`);
+}
+function openExport(){
+  const nova = `<div class="presets">
+      <button class="preset on"><b>PowerPoint</b>PNG por estado e MP4 por transição</button><button class="preset"><b>Google Slides</b>GIF por transição, paleta fixa</button>
+      <button class="preset"><b>Beamer / PDF</b>Só os PNG dos estados</button><button class="preset"><b>Vídeo da aula</b>Tudo num MP4 só</button></div>
+    <div>
+      <div class="setting"><div class="grow"><b>Resolução</b><div class="muted small">A final é renderizada de novo em alta qualidade.</div></div><div class="seg"><button>720p</button><button class="on">1080p</button><button disabled title="Na v0.2">4K</button></div></div>
+      <div class="setting"><div class="grow"><b>Quadros por segundo</b></div><div class="seg"><button>30</button><button class="on">60</button></div></div>
+      <div class="setting"><div class="grow"><b>Fundo</b><div class="muted small">Do seu perfil: branco, como o slide.</div></div><div class="seg"><button class="on">Branco</button><button>Preto</button><button disabled>Transparente</button></div></div>
+      <div class="setting"><div class="grow"><b>Proporção</b></div><div class="seg"><button class="on">16:9</button><button>4:3</button></div></div>
+    </div>
+    <div class="row"><span class="faint small grow">Leva uns 3 min. Os arquivos vão para <span class="mono">saida/powerpoint</span>.</span><button class="btn primary" onclick="exporting()">Exportar</button></div>`;
+  modal(`<div class="mhead">Exportar · ${lesson().name}${X_}</div><div class="mbody">
+    <div class="row" style="gap:16px;border-bottom:1px solid var(--line);margin-top:-6px">${[['nova','Nova exportação'],['ant','Anteriores (3)']].map(([k,t])=>`<button style="padding:6px 0;border-bottom:2px solid ${S.exportTab===k?'var(--accent)':'transparent'};${S.exportTab===k?'font-weight:600':'color:var(--muted)'}" onclick="S.exportTab='${k}';openExport()">${t}</button>`).join('')}</div>
+    ${S.exportTab==='nova'?nova:exportsList()}</div>`, true);
+}
+function exporting(){
+  modal(`<div class="mhead">Exportando…${X_}</div><div class="mbody">
+    <div class="row"><span class="spin"></span><span class="grow">Renderizando S2_Reflexao em 1080p60 · 3 de 9</span><span class="faint">33%</span></div>
+    <div class="bar"><i style="width:33%;background:var(--blue)"></i></div><div class="muted small">Pode continuar conversando enquanto isso.</div>
+    <div class="row" style="justify-content:flex-end"><button class="btn" onclick="closeModal()">Ocultar</button><button class="btn primary" onclick="exportDone(lesson().short)">Simular fim</button></div></div>`);
+}
+function exportDone(name){ modal(`<div class="mhead">Exportação pronta ✓${X_}</div><div class="mbody"><div>${name}: 9 PNG e 7 MP4 em <span class="mono">saida/powerpoint</span>.</div><div class="row" style="justify-content:flex-end"><button class="btn" onclick="closeModal()">Fechar</button><button class="btn primary">Abrir pasta</button></div></div>`); }
+function openSettings(tab){
+  const navs = [['conta','Conta'],['modelo','Modelo'],['uso','Uso do plano'],['perfil','Perfil do professor'],['pasta','Pasta das aulas']];
+  const sec = {
+    conta:`<h3>Conta</h3><div class="row"><div class="avatar">PR</div><div class="grow"><b>Conectado com o ChatGPT</b><div class="muted small">Plano Plus</div></div><button class="btn sm">Sair</button></div>`,
+    modelo:`<h3>Modelo</h3><div class="setting" style="border:0"><div class="grow"><b>Padrão das aulas</b></div><div class="seg"><button class="on">⚡ Rápido</button><button>✦ Caprichado</button></div></div><details><summary class="muted">Avançado</summary><div class="setting"><div class="grow">Esforço de raciocínio</div><div class="seg"><button>baixo</button><button class="on">médio</button><button>alto</button></div></div></details>`,
+    uso:`<h3>Uso do plano</h3><div class="hint">ℹ️ Estes limites são do seu plano do ChatGPT, não do ManimFlow.</div><div style="margin-top:18px"><b>Limite de 5 horas</b><div class="muted small">Renova em 2 h 10 min</div><div class="bar" style="height:8px;margin-top:8px"><i style="width:42%"></i></div></div><div style="margin-top:18px"><b>Limite semanal</b><div class="muted small">Renova na segunda</div><div class="bar" style="height:8px;margin-top:8px"><i style="width:18%"></i></div></div>`,
+    perfil:`<h3>Perfil do professor</h3><div class="setting"><div class="grow"><b>Fundo</b></div><div class="seg"><button class="on">Branco</button><button>Preto</button></div></div><div class="setting"><div class="grow"><b>Paleta</b></div><div class="row">${Object.values(C).slice(0,6).map(c=>`<span style="width:20px;height:20px;border-radius:6px;background:${c}"></span>`).join('')}</div></div><div class="setting"><div class="grow"><b>Separador decimal</b></div><div class="seg"><button class="on">vírgula</button><button>ponto</button></div></div>`,
+    pasta:`<h3>Pasta das aulas</h3><input class="field mono" value="C:\\Users\\prof\\Documents\\Aulas Manim"><button class="btn sm" style="margin-top:10px">Trocar pasta…</button>`,
+  };
+  modal(`<div class="mhead">Configurações${X_}</div><div class="settings"><nav>${navs.map(([k,l])=>`<button class="nav ${k===tab?'on':''}" onclick="openSettings('${k}')">${l}</button>`).join('')}</nav><section>${sec[tab]}</section></div>`, true);
+}
+function openSearch(){
+  const all = PROJECTS.flatMap(p=>p.lessons.map(l=>({...l,p})));
+  modal(`<div class="mbody" style="padding-top:16px"><input class="field" placeholder="Buscar aulas…" autofocus>${all.map(l=>`<button class="nav" onclick="closeModal();openLesson('${l.p.id}','${l.id}')"><span class="ic" style="color:${l.p.fg}">${l.p.icon}</span><span class="grow ellipsis">${l.name}</span><span class="faint small">${l.when}</span></button>`).join('')}</div>`, false, true);
+}
+// C: Ctrl+K palette — lessons and actions in one place
+function openPalette(){
+  const l = S.view==='lesson' ? lesson() : null;
+  const actions = [
+    ['＋','Nova aula em '+proj().name, `closeModal();newLessonIn('${S.project}')`],
+    l && ['⇩','Exportar '+l.short+' para PowerPoint', `closeModal();openExport()`],
+    l && ['▶','Renderizar a prévia de novo', `closeModal();send('Renderize a prévia de novo')`],
+    l && ['📁','Abrir a pasta da aula', 'closeModal()'],
+    ['✎','Editar as instruções de '+proj().name, `closeModal();go({view:'project',projTab:'instr'})`],
+    ['★','Abrir o exemplo de relatividade', `closeModal();openLesson('rel','ex')`],
+    ['⚙','Configurações', `openSettings('conta')`],
+  ].filter(Boolean);
+  const lessons = PROJECTS.flatMap(p=>p.lessons.map(x=>({...x,p})));
+  modal(`<div class="palette" style="padding:10px"><input class="field" placeholder="Buscar aula, turma ou ação…" autofocus style="font-size:15px;padding:11px 14px">
+    <div class="grp">Ações</div>${actions.map(([i,t,on],k)=>`<button class="item ${k===0?'on':''}" onclick="${on}"><span class="tsq" style="background:var(--accent-soft);color:var(--accent)">${i}</span>${t}</button>`).join('')}
+    <div class="grp">Aulas</div>${lessons.map(x=>`<button class="item" onclick="closeModal();openLesson('${x.p.id}','${x.id}')"><span class="tsq" style="background:${x.p.bg};color:${x.p.fg}">${x.p.icon}</span><span class="grow ellipsis">${x.name}</span><span class="pill" style="background:${STATUS[x.status].bg};color:${STATUS[x.status].c}">${STATUS[x.status].t}</span></button>`).join('')}
+    <div class="row faint small" style="padding:10px 12px 4px"><kbd>↑</kbd><kbd>↓</kbd> navegar <kbd>Enter</kbd> abrir <kbd>Esc</kbd> fechar</div></div>`, false, true);
+}
+function openThreads(){
+  modal(`<div class="mhead">Conversas desta aula${X_}</div><div class="mbody"><div class="muted small">Cada sessão começa uma conversa nova. O que foi decidido fica no CONTEXTO.md, então o agente não esquece.</div>
+    ${[['Hoje','Eixos do herói mais devagar'],['12/11','Plano e primeira prévia'],['10/11','Ideias iniciais']].map(([d,t],i)=>`<button class="nav ${i===0?'on':''}"><span class="grow">${t}</span><span class="faint small">${d}</span></button>`).join('')}</div>`);
+}
+function openVersions(){
+  modal(`<div class="mhead">Versões${X_}</div><div class="mbody">${[['agora','Eixos do herói mais devagar','agente'],['há 1 h','Edição manual em cenas.py','você'],['ontem','Primeira prévia','agente'],['12/11','Plano aprovado','agente']].map(([d,t,w])=>`<div class="row" style="padding:8px 0;border-bottom:1px solid var(--line)"><div class="grow"><b>${t}</b><div class="faint small">${d} · ${w}</div></div><button class="btn sm">Ver</button><button class="btn sm">Voltar para esta</button></div>`).join('')}</div>`);
+}
+function popMenu(e, html){
+  closeMenu(); const r = e.currentTarget.getBoundingClientRect();
+  const m = document.createElement('div'); m.className='menu'; m.id='menu';
+  m.style.left = Math.min(r.left, innerWidth-240)+'px'; m.style.top = (r.bottom+6)+'px'; m.innerHTML = html;
+  document.body.appendChild(m); setTimeout(()=>addEventListener('click',closeMenu,{once:true}));
+}
+function closeMenu(){ document.getElementById('menu')?.remove(); }
+function lessonMenu(e){ popMenu(e, `<button onclick="openThreads()">🕘 Conversas anteriores</button><button onclick="openVersions()">↺ Versões</button><button>📁 Abrir pasta da aula</button><button>✎ Renomear</button><button>⇄ Mover para outra turma</button><button>⧉ Duplicar como modelo</button><button style="color:var(--red)">🗑 Apagar</button>`); }
+function turmaMenu(e,id){ popMenu(e, `<button onclick="newLessonIn('${id}')">＋ Nova aula</button><button>✎ Renomear turma</button><button>🎨 Mudar cor</button><button>📁 Abrir pasta</button><button>🗄 Arquivar semestre</button>`); }
+function pickTurma(e){ e.stopPropagation(); popMenu(e, PROJECTS.map(p=>`<button onclick="go({project:'${p.id}'})"><span style="color:${p.fg}">${p.icon}</span>${p.name}</button>`).join('') + `<button onclick="openNewProject()">＋ Nova turma</button>`); }
+
+// ═════════════════════════════════════════════════════════════
+//  Fake behaviour
+// ═════════════════════════════════════════════════════════════
+function openLesson(p,l){ go({view:'lesson',project:p,lesson:l,extra:[],state:'S3',playing:null,draft:null,pinMode:false, wsTab: l==='a10'?'plan':'preview'}); }
+function newLessonIn(p){ S.open[p]=true; openLesson('rel','a10'); }
+function approve(){ S.planApproved.a10=true; send('Aprovado. Pode fazer.'); }
+function stageClick(e){
+  if(!S.pinMode || e.target.closest('.pinbox')) return;
+  const r = e.currentTarget.getBoundingClientRect();
+  go({draft:{x:Math.round((e.clientX-r.left)/r.width*100), y:Math.round((e.clientY-r.top)/r.height*100)}});
+  setTimeout(()=>document.getElementById('pinText')?.focus());
+}
+function addPin(){
+  const t = document.getElementById('pinText')?.value.trim(); if(!t) return;
+  const pin = {state:S.state, x:S.draft.x, y:S.draft.y, text:t};
+  S.pins.push(pin); S.pending.push(pin); go({draft:null, pinMode:false});
+}
+let raf;
+function play(id){
+  cancelAnimationFrame(raf); S.state=id; S.playing=id; S.progress=0; S.draft=null; render();
+  const dur = Math.min(TRANS[id],5)*600, t0 = performance.now();
+  const step = now => {
+    S.progress = Math.min(1,(now-t0)/dur);
+    const st = document.querySelector('#stage svg'); if(st) st.outerHTML = diagram(id, S.progress);
+    const sc = document.getElementById('scrub'); if(sc) sc.style.width = S.progress*100+'%';
+    const fl = document.getElementById('fill'); if(fl) fl.style.width = S.progress*100+'%';
+    if(S.progress<1) raf = requestAnimationFrame(step); else { S.playing=null; render(); }
+  };
+  raf = requestAnimationFrame(step);
+}
+function send(text){
+  const box = document.getElementById('msg');
+  text = text || box?.value.trim(); if(!text && !S.pending.length) return;
+  if(S.view!=='lesson'){ openLesson(S.project,'a10'); }
+  const pinsTxt = S.pending.map(p=>`📍 ${p.state}: ${p.text}`).join('\n');
+  S.pending.forEach(p=>p.sent=true); S.pending=[];
+  const steps = [['run','Lendo CONTEXTO.md e plano.yaml']], msg = {who:'agent', steps, done:false};
+  S.extra.push({who:'me', text:[text,pinsTxt].filter(Boolean).join('\n')}, msg); render(); scrollEnd();
+  const script = [['Arquivo alterado: cenas.py'],['Renderizando a prévia','manimflow preview .'],['Conferindo a continuidade','manimflow check-continuity .']];
+  let i=0; const tick = setInterval(()=>{
+    steps[steps.length-1][0]='ok';
+    if(i<script.length) steps.push(['run',...script[i++]]);
+    else { clearInterval(tick); msg.done=true; msg.summary='Trabalhou por 9 s · 4 etapas'; msg.text='(Protótipo) Feito. Aqui viria o que mudou e o cartão da prévia.'; S.pins.forEach(p=>{ if(p.sent) p.done=true; }); }
+    render(); scrollEnd();
+  }, 900);
+}
+function scrollEnd(){ const t=document.getElementById('thread'); if(t) t.scrollTop=t.scrollHeight; }
+
+// ═════════════════════════════════════════════════════════════
+//  Render
+// ═════════════════════════════════════════════════════════════
+function render(){
+  document.body.classList.toggle('c', isC());
+  const main = S.view==='home' ? (isC()?homeC():homeF()) : S.view==='project' ? (isC()?projectC():projectF()) : lessonScreen();
+  const keepScroll = document.getElementById('thread')?.scrollTop;
+  document.getElementById('app').innerHTML = (isC()?sidebarC():sidebarF()) + `<main class="main">${main}</main>`;
+  if(keepScroll!=null){ const t=document.getElementById('thread'); if(t) t.scrollTop=keepScroll; }
+  document.querySelectorAll('.tex').forEach(el=>{ try{ katex.render(el.dataset.tex, el, {throwOnError:false}); }catch(e){ el.textContent = el.dataset.tex; } });
+  document.getElementById('switcher').innerHTML = `<span class="tag-proto">PROTÓTIPO</span><button onclick="cycle(-1)">←</button><span><b>${S.variant}</b> · ${VARIANTS[S.variant]}</span><button onclick="cycle(1)">→</button>`;
+}
+function cycle(d){
+  const keys = Object.keys(VARIANTS); S.variant = keys[(keys.indexOf(S.variant)+d+keys.length)%keys.length];
+  const u = new URL(location); u.searchParams.set('variant', S.variant); history.replaceState(null,'',u); render();
+}
+addEventListener('keydown', e=>{
+  if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='k'){ e.preventDefault(); isC()?openPalette():openSearch(); return; }
+  if(e.key==='Escape'){ closeModal(); closeMenu(); if(S.draft||S.pinMode) go({draft:null,pinMode:false}); return; }
+  if(e.target.closest('input,textarea,[contenteditable]')) return;
+  if(e.key==='ArrowLeft') cycle(-1); if(e.key==='ArrowRight') cycle(1);
+});
+// ?screen= jumps straight to a screen
+({home:()=>go({view:'home'}), project:()=>go({view:'project'}), plan:()=>openLesson('rel','a10'), rendering:()=>openLesson('rel','a11'),
+  code:()=>go({wsTab:'code'}), eq:()=>go({wsTab:'eq'}), closed:()=>go({ws:false}), wide:()=>go({chatW:320}),
+  export:()=>openExport(), palette:()=>openPalette(), pin:()=>go({pinMode:true,draft:{x:30,y:55}}), settings:()=>openSettings('uso')}[params.get('screen')]||(()=>{}))();
+render();
+</script>
+</body>
+</html>
