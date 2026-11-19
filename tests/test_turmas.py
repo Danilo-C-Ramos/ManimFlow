@@ -192,6 +192,13 @@ def test_the_example_never_waits_for_an_approval(library):
     assert status(library.example()) != Status.PLAN
 
 
+def test_an_example_copied_before_approvals_were_recorded_does_not_wait_either(library):
+    example = library.example()
+    (example / ".git" / "manimflow-plano-aprovado").unlink()
+
+    assert status(Library(library.data).example()) != Status.PLAN
+
+
 # ── Pages ──
 
 

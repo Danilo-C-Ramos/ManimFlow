@@ -292,7 +292,9 @@ class Library:
             shutil.copytree(_EXAMPLES / "relatividade", staging / EXAMPLE_NAME)
             shutil.rmtree(examples, ignore_errors=True)
             staging.rename(examples)
-            # Its plan was agreed long ago: it never waits for the teacher's approval.
+        if not approval_file(example).exists():
+            # Its plan was agreed long ago: it doesn't wait for the teacher's approval,
+            # also in a copy made before approvals were recorded.
             History.open(example).approve_plan()
         return example
 
