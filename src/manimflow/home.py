@@ -1,31 +1,46 @@
-"""The app's pages: the home ("Minhas aulas") and the lesson screens it opens.
+"""The app's pages: the home, a turma's page and the lesson screens they open, each with
+the sidebar.
 
 Every UI string is in Portuguese.
 """
 
 import logging
-import sys
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import quote
 
 from nicegui import ui
 from starlette.requests import Request
 
+from manimflow import activity
 from manimflow.agent import Agent
-from manimflow.app import lesson_page
-from manimflow.lessons import EXAMPLE_NAME, LessonNameError, LessonSummary, Library
+from manimflow.app import Opening, lesson_page, send_on_open
+from manimflow.dialogs import (
+    EXAMPLE_ROUTE,
+    LESSON_ROUTE,
+    TURMA_ROUTE,
+    FolderDialog,
+    InstructionsDialog,
+    NewLessonDialog,
+    NewTurmaDialog,
+    lesson_url,
+    shared,
+    turma_url,
+)
+from manimflow.lessons import EXAMPLE_NAME, LessonNameError, LessonSummary, Library, Status, Turma, status
+from manimflow.plan import load_plan
+from manimflow.preview import latest_render, serve_outputs
+from manimflow.settings import model_switch
+from manimflow.sidebar import Here, Sidebar, drawer
+from manimflow.theme import apply_theme, status_pill, turma_badge
 
 logger = logging.getLogger(__name__)
 
-_LESSON_ROUTE = "/aula/"
-_EXAMPLE_ROUTE = "/exemplo"
-_EXAMPLE_FOLDER = r"C:\Users\Ana\Documents\Aulas Manim" if sys.platform == "win32" else "~/Documentos/Aulas Manim"
+_NO_TURMA = ""
 
 
 def app_root(agent: Agent, library: Library) -> Callable[[Request], Awaitable[None]]:
-    """The root page, which shows the home or a lesson depending on the address.
+    """The root page, which shows the home, a turma or a lesson depending on the address.
 
     Not ui.sub_pages: the lesson screen has a header, which NiceGUI only allows at
     the top of a page.
@@ -33,235 +48,273 @@ def app_root(agent: Agent, library: Library) -> Callable[[Request], Awaitable[No
     example = library.example()
 
     async def page(request: Request) -> None:
+        apply_theme()
         path = request.url.path
-        if path == _EXAMPLE_ROUTE:
-            await lesson_page(agent, example, lambda: LessonList(library, None))()
-            return
-        if path.startswith(_LESSON_ROUTE):
-            lesson = library.lesson(path.removeprefix(_LESSON_ROUTE))
-            if lesson is not None:
-                await lesson_page(agent, lesson, lambda: LessonList(library, lesson.name))()
-            else:
-                _not_found("Esta aula não está na pasta das aulas.")
+        opening = Opening(tab=request.query_params.get("aba"), export="exportar" in request.query_params)
+        if path == EXAMPLE_ROUTE:
+            await lesson_page(agent, example, _sidebar(library, agent, Here(example=True)), opening)()
+        elif path.startswith(LESSON_ROUTE):
+            lesson = library.lesson(path.removeprefix(LESSON_ROUTE))
+            if lesson is None:
+                _not_found(library, agent, "Esta aula não está na pasta das aulas.")
+                return
+            turma = library.turma_of(lesson)
+            here = Here(lesson=lesson, turma=turma.name if turma else None)
+            await lesson_page(agent, lesson, _sidebar(library, agent, here), opening, turma)()
+        elif path.startswith(TURMA_ROUTE):
+            turma = library.turma(path.removeprefix(TURMA_ROUTE))
+            if turma is None:
+                _not_found(library, agent, "Esta turma não está na pasta das aulas.")
+                return
+            _drawer(library, agent, Here(turma=turma.name))
+            await TurmaPage.build(library, agent, turma)
         elif path == "/":
-            Home(library)
+            _drawer(library, agent, Here())
+            await Home.build(library, agent)
         else:
-            _not_found("Esta página não existe.")
+            _not_found(library, agent, "Esta página não existe.")
 
     return page
 
 
-def lesson_url(name: str) -> str:
-    return _LESSON_ROUTE + quote(name)
+def _sidebar(library: Library, agent: Agent, here: Here) -> Callable[[], object]:
+    return lambda: Sidebar(library, agent, here)
+
+
+def _drawer(library: Library, agent: Agent, here: Here) -> None:
+    drawer(lambda: Sidebar(library, agent, here))
+
+
+class StartComposer:
+    """The message box that starts a lesson: the teacher describes the animation, picks the
+    turma, and the new lesson opens with the message on its way to the agent."""
+
+    def __init__(self, library: Library, turma: str | None, placeholder: str, pick_turma: bool) -> None:
+        self.library = library
+        with ui.column().classes("mf-composer").mark("start-composer"):
+            self.text = (
+                ui.textarea(placeholder=placeholder)
+                .props("borderless autogrow dense")
+                .classes("w-full")
+                .mark("start-message")
+            )
+            self.text.on("keydown.enter.exact.prevent", self.start)
+            with ui.row().classes("w-full items-center no-wrap gap-2"):
+                turmas = {turma.name: turma.name for turma in library.turmas()}
+                self.turma = ui.select(
+                    {_NO_TURMA: "Sem turma", **turmas}, value=turma if turma in turmas else _NO_TURMA
+                ).props("dense borderless options-dense").classes("text-[13px]").mark("start-turma")
+                self.turma.set_visibility(pick_turma and bool(turmas))
+                self.switch_slot = ui.row().classes("items-center")
+                ui.space()
+                ui.button(icon="arrow_upward", on_click=self.start).props("round unelevated dense").classes(
+                    "w-[34px] h-[34px]"
+                ).tooltip("Começar a aula").mark("start")
+
+    async def add_switch(self, agent: Agent) -> None:
+        with self.switch_slot:
+            try:
+                await model_switch(agent)
+            except Exception:
+                # Signed out: the lesson asks to sign in first, and the switch shows there.
+                logger.debug("Reading the model settings failed", exc_info=True)
+
+    def start(self) -> None:
+        text = (self.text.value or "").strip()
+        if not text:
+            return
+        turma = self.turma.value or None
+        try:
+            lesson = self.library.create(self.library.free_name(text, turma), turma)
+        except (LessonNameError, OSError):
+            logger.exception("Creating a lesson from a message failed")
+            ui.notify("Não foi possível criar a aula na pasta das aulas.", type="negative")
+            return
+        send_on_open(lesson, text)
+        ui.navigate.to(lesson_url(self.library.lesson_id(lesson) or lesson.name))
 
 
 class Home:
-    def __init__(self, library: Library) -> None:
-        self.library = library
-        ui.page_title("Minhas aulas · ManimFlow")
-        new_lesson = NewLessonDialog(library)
-        folder_dialog = FolderDialog(library, on_changed=self._show_lessons)
-        profile_dialog = ProfileDialog(library)
-        with ui.column().classes("w-full max-w-5xl mx-auto p-6 gap-6"):
-            with ui.row().classes("w-full items-center justify-between"):
-                ui.label("Minhas aulas").classes("text-3xl")
-                with ui.row().classes("items-center gap-2"):
-                    ui.button("Perfil do professor", icon="tune", on_click=profile_dialog.open).props("flat")
-                    ui.button("+ Nova aula", on_click=new_lesson.open).props("size=lg")
-            self.cards = ui.row().classes("w-full gap-4").mark("lessons")
-            with ui.row().classes("items-center gap-2 text-grey-7"):
-                self.folder = ui.label()
-                ui.button("Mudar pasta", on_click=folder_dialog.open).props("flat dense")
-            ui.separator()
-            with ui.row().classes("w-full items-center justify-between"):
-                ui.label(f"Exemplo · {EXAMPLE_NAME}").classes("text-grey-8")
-                ui.button("Abrir o exemplo", on_click=lambda: ui.navigate.to(_EXAMPLE_ROUTE)).props("outline")
-        self._show_lessons()
-
-    def _show_lessons(self) -> None:
-        self.folder.set_text(f"Pasta das aulas: {self.library.folder}")
-        self.cards.clear()
-        lessons = self.library.lessons()
-        with self.cards:
-            if not lessons:
-                ui.label('Nenhuma aula nesta pasta ainda. Comece por "+ Nova aula".').classes("text-grey-7")
-            for lesson in lessons:
-                with ui.card().classes("w-64 relative hover:shadow-lg"):
-                    # Stretched over the whole card, so clicking anywhere on it opens the lesson.
-                    ui.link(lesson.name, lesson_url(lesson.name)).classes(
-                        "text-lg font-medium text-inherit no-underline after:absolute after:inset-0"
-                    )
-                    ui.label(_details(lesson)).classes("text-grey-7 text-sm")
-
-
-class LessonList:
-    """The lesson screen's side column: the teacher's lessons, with the open one marked,
-    the example, "+ Nova aula" and the profile. `current` is None for the example."""
-
-    def __init__(self, library: Library, current: str | None) -> None:
-        new_lesson = NewLessonDialog(library)
-        profile_dialog = ProfileDialog(library)
-        with ui.column().classes("w-full gap-1").mark("lesson-list"):
-            ui.label("Aulas").classes("text-lg")
-            for lesson in library.lessons():
-                _entry(lesson.name, lesson_url(lesson.name), lesson.name == current)
-            ui.separator()
-            _entry("Exemplo", _EXAMPLE_ROUTE, current is None)
-        with ui.column().classes("w-full gap-1 mt-4"):
-            ui.button("+ Nova aula", on_click=new_lesson.open).props("flat dense align=left")
-            ui.button("Perfil do professor", icon="tune", on_click=profile_dialog.open).props("flat dense align=left")
-
-
-def _entry(name: str, url: str, current: bool) -> None:
-    if current:
-        ui.label(name).classes("font-bold").mark("current-lesson")
-    else:
-        ui.link(name, url).classes("text-inherit no-underline")
-
-
-class NewLessonDialog:
-    """Asks for the new lesson's name, creates it and opens it."""
+    """"O que vamos animar hoje?": a message box that starts a lesson, then the turmas,
+    the lessons without a turma and the example."""
 
     def __init__(self, library: Library) -> None:
         self.library = library
-        with ui.dialog() as self.dialog, ui.card().classes("w-96 items-stretch"):
-            ui.label("Nova aula").classes("text-lg")
-            self.name = (
-                ui.input("Nome da aula", placeholder="Aula 09 - Minkowski")
-                .props("outlined dense autofocus")
-                .mark("lesson-name-input")
+        ui.page_title("ManimFlow")
+        new_turma = shared(NewTurmaDialog, library)
+        folder_dialog = FolderDialog(library, on_changed=lambda: ui.navigate.reload())
+        with ui.column().classes("mf-page"):
+            with ui.column().classes("w-full max-w-2xl mx-auto items-center gap-2 mt-10"):
+                ui.label("O que vamos animar hoje?").classes("text-3xl font-medium")
+                ui.label("Descreva a animação e escolha a turma. O agente monta o plano antes de escrever código.").classes(
+                    "mf-muted text-center"
+                )
+                self.composer = StartComposer(
+                    library, None, "Ex.: uma onda estacionária numa corda com 3 harmônicos…", pick_turma=True
+                )
+            turmas = library.turmas()
+            with ui.row().classes("w-full items-center justify-between mt-6"):
+                ui.label("Turmas").classes("text-base font-semibold")
+                ui.button("Nova turma", icon="add", on_click=new_turma.open).props("flat no-caps dense")
+            with ui.element("div").classes("mf-grid").mark("turma-cards"):
+                for turma in turmas:
+                    _turma_card(turma, library.lessons(turma.name))
+                with ui.element("div").classes("mf-newcard").style("min-height:110px").on("click", new_turma.open):
+                    ui.label("＋ Nova turma")
+            loose = library.lessons()
+            ui.label("Aulas sem turma" if turmas else "Minhas aulas").classes("text-base font-semibold mt-4")
+            with ui.element("div").classes("mf-grid").mark("lessons"):
+                if not loose:
+                    ui.label("Nenhuma aula fora das turmas. Comece pela caixa de mensagem acima.").classes(
+                        "mf-muted"
+                    ).mark("no-lessons")
+                for lesson in loose:
+                    lesson_card(lesson, None)
+            with ui.row().classes("w-full items-center gap-2 mf-muted text-[13px]"):
+                ui.label(f"Pasta das aulas: {library.folder}")
+                ui.button("Mudar pasta", on_click=folder_dialog.open).props("flat dense no-caps")
+            ui.separator()
+            with ui.row().classes("w-full items-center justify-between"):
+                ui.label(f"Exemplo · {EXAMPLE_NAME}").classes("mf-muted")
+                ui.button("Abrir o exemplo", on_click=lambda: ui.navigate.to(EXAMPLE_ROUTE)).props(
+                    "outline no-caps"
+                )
+
+    @classmethod
+    async def build(cls, library: Library, agent: Agent) -> "Home":
+        home = cls(library)
+        await home.composer.add_switch(agent)
+        return home
+
+
+class TurmaPage:
+    """A turma: its color band with the counts and a message box for a new lesson, the
+    lesson cards with a "Nova aula" card, and the turma's instructions on the side."""
+
+    def __init__(self, library: Library, turma: Turma) -> None:
+        self.library = library
+        self.turma = turma
+        ui.page_title(f"{turma.name} · ManimFlow")
+        new_lesson = shared(NewLessonDialog, library)
+        instructions = shared(InstructionsDialog, library)
+        lessons = library.lessons(turma.name)
+        statuses = [status(lesson.path) for lesson in lessons]
+        with ui.column().classes("mf-page"):
+            with ui.column().classes("mf-band").style(f"background:{turma.color}14"):
+                with ui.row().classes("w-full items-start justify-between no-wrap"):
+                    with ui.row().classes("items-center gap-3 no-wrap"):
+                        turma_badge(turma, size=40)
+                        ui.label(turma.name).classes("text-2xl font-semibold")
+                    with ui.row().classes("gap-2").mark("turma-counts"):
+                        _stat(len(lessons), "aula" if len(lessons) == 1 else "aulas")
+                        ready = sum(state in (Status.READY, Status.EXPORTED) for state in statuses)
+                        _stat(ready, "pronta" if ready == 1 else "prontas")
+                        _stat(statuses.count(Status.PLAN), "para aprovar")
+                self.composer = StartComposer(
+                    library, turma.name, f"Nova aula em {turma.name}…", pick_turma=False
+                )
+            with ui.row().classes("w-full items-start no-wrap gap-6"):
+                with ui.column().classes("grow min-w-0 gap-3"):
+                    ui.label("Aulas").classes("text-base font-semibold")
+                    with ui.element("div").classes("mf-grid").mark("lessons"):
+                        for lesson in lessons:
+                            lesson_card(lesson, turma)
+                        with ui.element("div").classes("mf-newcard").on(
+                            "click", lambda: new_lesson.open(turma.name)
+                        ).mark("new-lesson-card"):
+                            ui.label("＋ Nova aula")
+                with ui.column().classes("w-72 flex-none gap-2 mf-card p-4 mt-9").mark("turma-instructions"):
+                    with ui.row().classes("w-full items-center justify-between"):
+                        ui.label("Instruções da turma").classes("font-semibold")
+                        ui.button("Editar", on_click=lambda: instructions.open(turma.name)).props(
+                            "flat dense no-caps"
+                        )
+                    try:
+                        text = library.turma_instructions(turma.name)
+                    except (OSError, UnicodeDecodeError):
+                        text = ""
+                    ui.markdown(text or "Sem instruções ainda.").classes("mf-instr text-[13px] mf-muted")
+                    ui.label("O agente lê estas instruções em toda aula da turma.").classes("text-xs mf-faint")
+
+    @classmethod
+    async def build(cls, library: Library, agent: Agent, turma: Turma) -> "TurmaPage":
+        page = cls(library, turma)
+        await page.composer.add_switch(agent)
+        return page
+
+
+def _stat(number: int, label: str) -> None:
+    with ui.element("div").classes("mf-stat"):
+        ui.html(f"<b>{number}</b>{label}")
+
+
+def _turma_card(turma: Turma, lessons: list[LessonSummary]) -> None:
+    with ui.card().classes("mf-card p-4 gap-2").mark("turma-card"):
+        with ui.row().classes("items-center gap-3 no-wrap w-full"):
+            turma_badge(turma, size=32)
+            ui.link(turma.name, turma_url(turma.name)).classes("font-medium mf-stretch text-inherit no-underline")
+        count = len(lessons)
+        ui.label(f"{count} aula" + ("" if count == 1 else "s")).classes("text-[13px] mf-muted")
+        ui.element("div").classes("h-1 w-12 rounded").style(f"background:{turma.color}")
+
+
+def lesson_card(lesson: LessonSummary, turma: Turma | None) -> None:
+    """A lesson as a card: its newest state image, name, status and last edit."""
+    current = status(lesson.path)
+    working = activity.working(lesson.path)
+    url = lesson_url(lesson.id)
+    with ui.card().classes("mf-card mf-lessoncard").mark("lesson-card"):
+        with ui.element("div").classes("mf-thumb"):
+            if thumbnail := _thumbnail(lesson.path):
+                ui.image(thumbnail)
+            else:
+                ui.label("sem prévia ainda")
+        with ui.row().classes("mf-hover"):
+            ui.button("▶ Prévia", on_click=lambda: ui.navigate.to(url + "?aba=Prévia")).props(
+                "dense no-caps unelevated color=white text-color=black size=sm"
             )
-            self.name.on("keydown.enter", self._create)
-            self.error = ui.label().classes("text-negative")
-            self.error.set_visibility(False)
-            with ui.row().classes("justify-end"):
-                ui.button("Cancelar", on_click=self.dialog.close).props("flat")
-                ui.button("Criar", on_click=self._create)
-
-    def open(self) -> None:
-        self.name.value = ""
-        self.error.set_visibility(False)
-        self.dialog.open()
-
-    def _create(self) -> None:
-        try:
-            lesson = self.library.create(self.name.value or "")
-        except LessonNameError as problem:
-            self._fail(str(problem))
-            return
-        except OSError:
-            logger.exception("Creating a lesson failed")
-            self._fail("Não foi possível criar a aula nesta pasta. Confira se ela existe e se você pode gravar nela.")
-            return
-        self.dialog.close()
-        ui.navigate.to(lesson_url(lesson.name))
-
-    def _fail(self, message: str) -> None:
-        self.error.set_text(message)
-        self.error.set_visibility(True)
+            ui.button("⇩ Exportar", on_click=lambda: ui.navigate.to(url + "?exportar=1")).props(
+                "dense no-caps unelevated color=white text-color=black size=sm"
+            )
+        with ui.column().classes("mf-body"):
+            ui.link(lesson.name, url).classes("font-medium mf-stretch text-inherit no-underline ellipsis w-full")
+            with ui.row().classes("w-full items-center justify-between no-wrap"):
+                status_pill(current, working)
+                ui.label(_edited(lesson.edited)).classes("text-xs mf-faint whitespace-nowrap")
+            details = [turma.name] if turma else []
+            if lesson.states is not None:
+                details.append(f"{lesson.states} estado" + ("" if lesson.states == 1 else "s"))
+            if details:
+                ui.label(" · ".join(details)).classes("text-xs mf-faint")
 
 
-class FolderDialog:
-    """Moves the lessons to another folder, such as a synced one, from now on."""
-
-    def __init__(self, library: Library, on_changed: Callable[[], None]) -> None:
-        self.library = library
-        self.on_changed = on_changed
-        with ui.dialog() as self.dialog, ui.card().classes("w-[36rem] items-stretch"):
-            ui.label("Pasta das aulas").classes("text-lg")
-            ui.label(
-                "As aulas que já estão na pasta atual ficam onde estão. Uma pasta que ainda não existe é criada."
-            ).classes("text-grey-7")
-            self.path = ui.input("Caminho da pasta").props("outlined dense").mark("folder-input")
-            self.path.on("keydown.enter", self._save)
-            self.error = ui.label().classes("text-negative")
-            self.error.set_visibility(False)
-            with ui.row().classes("justify-end"):
-                ui.button("Cancelar", on_click=self.dialog.close).props("flat")
-                ui.button("Salvar pasta", on_click=self._save)
-
-    def open(self) -> None:
-        self.path.value = str(self.library.folder)
-        self.error.set_visibility(False)
-        self.dialog.open()
-
-    def _save(self) -> None:
-        folder = Path(self.path.value or "").expanduser()
-        if not folder.is_absolute():
-            self._fail(f"Use o caminho completo da pasta, como {_EXAMPLE_FOLDER}.")
-            return
-        try:
-            self.library.set_folder(folder)
-        except OSError:
-            logger.exception("Changing the lessons folder failed")
-            self._fail("Não foi possível usar essa pasta. Confira o caminho e se você pode gravar nela.")
-            return
-        self.dialog.close()
-        self.on_changed()
-
-    def _fail(self, message: str) -> None:
-        self.error.set_text(message)
-        self.error.set_visibility(True)
+def _thumbnail(lesson: Path) -> str | None:
+    """The newest image of the lesson's last rendered state, or None before any render."""
+    try:
+        plan, _ = load_plan(lesson)
+    except Exception:
+        return None
+    if plan is None:
+        return None
+    served_at = serve_outputs(lesson)
+    for state in reversed(plan.states):
+        if url := latest_render(lesson, served_at, state.scene, "png"):
+            return url
+    return None
 
 
-class ProfileDialog:
-    """Shows and edits the teacher's profile, which every lesson in the folder follows."""
-
-    def __init__(self, library: Library) -> None:
-        self.library = library
-        with ui.dialog().props("full-width") as self.dialog, ui.card().classes("items-stretch"):
-            ui.label("Perfil do professor").classes("text-lg")
-            ui.label(
-                "Preferências que valem para todas as aulas: cores, fontes, vírgula decimal, fundo dos slides. "
-                "O agente lê este perfil antes de cada pedido."
-            ).classes("text-grey-7")
-            self.text = ui.textarea().props("outlined autogrow").classes("font-mono").mark("profile-input")
-            self.error = ui.label().classes("text-negative")
-            self.error.set_visibility(False)
-            with ui.row().classes("justify-end"):
-                ui.button("Cancelar", on_click=self.dialog.close).props("flat")
-                ui.button("Salvar perfil", on_click=self._save)
-
-    def open(self) -> None:
-        self.error.set_visibility(False)
-        try:
-            self.text.value = self.library.profile()
-        except (OSError, UnicodeDecodeError):
-            logger.exception("Reading the profile failed")
-            ui.notify("Não foi possível abrir o perfil.", type="negative")
-            return
-        self.dialog.open()
-
-    def _save(self) -> None:
-        try:
-            self.library.save_profile(self.text.value or "")
-        except OSError:
-            logger.exception("Saving the profile failed")
-            self.error.set_text("Não foi possível salvar o perfil. Confira se você pode gravar na pasta das aulas.")
-            self.error.set_visibility(True)
-            return
-        self.dialog.close()
-        ui.notify("Perfil salvo.", type="positive")
-
-
-def _not_found(message: str) -> None:
+def _not_found(library: Library, agent: Agent, message: str) -> None:
     ui.page_title("ManimFlow")
-    with ui.column().classes("w-full max-w-5xl mx-auto p-6 gap-4"):
+    _drawer(library, agent, Here())
+    with ui.column().classes("mf-page"):
         ui.label(message).classes("text-lg")
-        ui.link("Voltar para Minhas aulas", "/")
-
-
-def _details(lesson: LessonSummary) -> str:
-    details = [_edited(lesson.edited)]
-    if lesson.states is not None:
-        details.append(f"{lesson.states} estado" + ("" if lesson.states == 1 else "s"))
-    return " · ".join(details)
+        ui.link("Voltar para o início", "/")
 
 
 def _edited(when: datetime) -> str:
     days = (datetime.now().date() - when.date()).days
     if days == 0:
-        return f"editada hoje às {when:%H:%M}"
+        return f"hoje às {when:%H:%M}"
     if days == 1:
-        return f"editada ontem às {when:%H:%M}"
-    return f"editada em {when:%d/%m/%Y}"
+        return f"ontem às {when:%H:%M}"
+    return f"em {when:%d/%m/%Y}"

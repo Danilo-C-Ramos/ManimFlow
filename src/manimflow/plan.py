@@ -43,6 +43,8 @@ class State:
     id: str
     scene: str
     title: str
+    # What the image shows, in the teacher's words.
+    visible: str = ""
 
 
 @dataclass(frozen=True)
@@ -50,6 +52,9 @@ class Transition:
     source: str
     target: str
     scene: str
+    description: str = ""
+    # Approximate seconds.
+    duration: float | None = None
 
     @property
     def name(self) -> str:
@@ -79,8 +84,11 @@ def load_plan(lesson: Path) -> tuple[Plan | None, list[str]]:
     if not report.ok:
         return None, report.errors
     plan = yaml.safe_load((report.lesson / PLAN_FILE).read_text(encoding="utf-8"))
-    states = [State(item["id"], item["cena"], item["titulo"]) for item in plan["estados"]]
-    transitions = [Transition(item["de"], item["para"], item["cena"]) for item in plan.get("transicoes") or []]
+    states = [State(item["id"], item["cena"], item["titulo"], str(item.get("visivel") or "")) for item in plan["estados"]]
+    transitions = [
+        Transition(item["de"], item["para"], item["cena"], str(item.get("descricao") or ""), item.get("duracao"))
+        for item in plan.get("transicoes") or []
+    ]
     return Plan(states, transitions), []
 
 

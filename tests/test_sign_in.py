@@ -30,7 +30,7 @@ async def test_signing_in_with_chatgpt_opens_the_chat(tmp_path):
         await user.should_see(marker="message")
         await user.should_not_see("Entrar com o ChatGPT")
         user.find(marker="message").type("oi")
-        user.find("Enviar").click()
+        user.find(marker="send").click()
         await user.should_see("Oi, professora.")
 
 

@@ -7,7 +7,8 @@ the teacher's profile, so it shows the new equations after any change, whoever
 made it: an agent turn, a manual edit and render, or the teacher in an editor.
 
 Values use a decimal comma when the teacher's profile (`perfil.md`, one level
-above the lesson) asks for a "vírgula decimal", as the bundled profile does.
+above the lesson, or two inside a turma) asks for a "vírgula decimal", as the
+bundled profile does.
 """
 
 import asyncio
@@ -23,9 +24,10 @@ from pathlib import Path
 
 from nicegui import ui
 
+from manimflow.lessons import profile_of
+
 logger = logging.getLogger(__name__)
 
-PROFILE_FILE = "perfil.md"
 # Seconds `equacoes()` may take before it is stopped.
 TIMEOUT = 10.0
 # Seconds between looks at the lesson folder.
@@ -80,7 +82,7 @@ class EquationsPanel:
             self._show(result, _decimal_comma(self.lesson))
 
     def _current_stamp(self) -> tuple:
-        files = sorted(self.lesson.glob("*.py")) + [self.lesson.parent / PROFILE_FILE]
+        files = sorted(self.lesson.glob("*.py")) + [profile_of(self.lesson)]
         return tuple((path.name, *_signature(path)) for path in files)
 
     def _show(self, result: list[_Entry] | _Message, decimal_comma: bool) -> None:
@@ -129,7 +131,7 @@ def _trim(number: str) -> str:
 
 def _decimal_comma(lesson: Path) -> bool:
     try:
-        profile = (lesson.parent / PROFILE_FILE).read_text(encoding="utf-8")
+        profile = profile_of(lesson).read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return False
     plain = unicodedata.normalize("NFKD", profile.casefold()).encode("ascii", "ignore").decode()

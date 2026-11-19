@@ -74,6 +74,7 @@ The main seam is the `manimflow` CLI. The agent calls it through its shell, and 
 
 - **NiceGUI.** The interface is written in Python and rendered in the browser with Vue/Quasar components. The server keeps a websocket open, so agent events and finished renders update the page without rerunning anything. Components used: `ui.chat_message`, `ui.codemirror`, `ui.video`, splitters, tabs.
 - **Delivery.** In v0.1, `uvx manimflow` opens the app in the browser. In v0.2, a one-line installer adds a desktop shortcut. A packaged `.exe` comes only if the one-liner proves insufficient; NiceGUI's native mode and `nicegui-pack` make that possible.
+- **Rebuilt after** the "ChatGPT with Projects" prototype (`prototypes/ui-chatgpt/` on `main`): a sidebar that maps the work (what needs the teacher, turmas with their lessons and a status each), a home that starts a lesson from a message, a page per turma, and a lesson screen with the chat beside a resizable, closable workspace. Turmas are [ADR 0004](adr/0004-lessons-are-grouped-in-turmas.md). See [lessons](lessons.md) and [the lesson screen](lesson-screen.md). The sketches below are the first version's.
 - **Home ("Minhas aulas").** Lesson cards and a prominent "+ Nova aula" button. The bundled example sits in a separate strip below, so it never mixes with the teacher's lessons. Lessons live in `<Documents>/Aulas Manim` by default, and the location can be changed.
 
 ```

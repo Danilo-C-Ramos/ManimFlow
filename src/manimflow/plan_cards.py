@@ -63,12 +63,18 @@ class PlanCards:
         self.served_at = serve_outputs(lesson)
         # Each card's thumbnail slot and the render it shows, None before the state is rendered.
         self.thumbnails: dict[str, tuple[ui.element, str | None]] = {}
-        with ui.card().classes("w-full"), ui.column().classes("w-full gap-2").mark("plan"):
-            with ui.row().classes("w-full items-center justify-between"):
-                ui.label("Plano").classes("text-lg")
-                self.approve_button = ui.button("Aprovar plano", on_click=self._approve)
+        with ui.column().classes("w-full gap-0").mark("plan"):
+            with ui.row().classes("w-full items-center justify-between no-wrap px-4 pt-3"):
+                with ui.row().classes("items-baseline gap-2 no-wrap min-w-0"):
+                    ui.label("Plano").classes("text-[15px] font-semibold")
+                    ui.label("Edite o texto ou comente; vai tudo numa mensagem só.").classes(
+                        "text-xs mf-faint ellipsis"
+                    ).mark("plan-hint")
+                self.approve_button = ui.button("Aprovar plano", on_click=self.approve).props(
+                    "unelevated no-caps rounded dense"
+                ).classes("px-3").mark("approve-plan")
                 self.approve_button.set_visibility(False)
-            self.content = ui.column().classes("w-full gap-2")
+            self.content = ui.row().classes("mf-board")
         self._build()
         self._refresh()
         ui.timer(REFRESH_INTERVAL, self._refresh)
@@ -101,7 +107,7 @@ class PlanCards:
                 slot.clear()
                 if url is not None:
                     with slot:
-                        ui.image(url).classes("w-48 rounded")
+                        ui.image(url).props("ratio=1.7778").classes("w-full rounded border")
                 self.thumbnails[state["id"]] = (slot, url)
 
     def _refresh_plan(self) -> bool:
@@ -127,11 +133,17 @@ class PlanCards:
             logger.debug("Plan refresh failed", exc_info=True)
             self.plan = None
         # The scaffold's placeholder is no plan yet: the agent writes the first one.
-        self.approve_button.set_visibility(self.plan is not None and not _placeholder(self.plan))
+        self.approve_button.set_visibility(self.can_approve)
         self._build()
         return True
 
-    async def _approve(self) -> None:
+    @property
+    def can_approve(self) -> bool:
+        """Whether there is a plan to approve: a valid one, not the scaffold's placeholder."""
+        return self.plan is not None and not _placeholder(self.plan)
+
+    async def approve(self) -> None:
+        """Sends the plan's approval, with the teacher's changes and comments, in one message."""
         if self.plan is None:
             return
         if self.chat.busy:
@@ -153,6 +165,11 @@ class PlanCards:
                 self.approved = previous
             return
         self._clear_handled(sent_comments)
+        try:
+            # The plan as the agent left it after acting on the approval.
+            self.history.approve_plan()
+        except Exception:
+            logger.exception("Recording the approval failed")
 
     def _clear_handled(self, handled: list[tuple[str, str]]) -> None:
         """Takes the comments the agent handled off the plan on disk, leaving any the
@@ -191,29 +208,34 @@ class PlanCards:
             for state in self.plan["estados"]:
                 self._draw_state(state)
                 if transition := transitions.get(state["id"]):
-                    ui.label(f"~{_seconds(transition['duracao'])} s · {transition['descricao']}")
-            ui.button("+ estado", on_click=self._add_state).props("outline")
+                    with ui.column().classes("mf-parrow"):
+                        ui.icon("arrow_forward", size="18px")
+                        ui.label(f"~{_seconds(transition['duracao'])} s · {transition['descricao']}")
+            with ui.column().classes("justify-center px-3"):
+                ui.button("+ estado", on_click=self._add_state).props("outline no-caps rounded").classes(
+                    "whitespace-nowrap"
+                )
         self._refresh_thumbnails()
 
     def _draw_state(self, state: Any) -> None:
-        with ui.card().classes("w-full"):
-            ui.label(state["id"]).classes("font-bold")
-            self.thumbnails[state["id"]] = (ui.element(), None)
+        with ui.card().classes("mf-pcard"):
+            ui.label(state["id"]).classes("mf-tag self-start")
+            self.thumbnails[state["id"]] = (ui.element().classes("w-full"), None)
             self._field(ui.input, "Título", state, "titulo")
             self._field(ui.textarea, "O que aparece", state, "visivel").props("autogrow")
             for index, comment in enumerate(_comments(state)):
                 with ui.row().classes("w-full items-center no-wrap gap-2"):
-                    ui.icon("chat_bubble_outline", color="grey-7")
-                    ui.label(comment).classes("grow")
+                    ui.icon("chat_bubble_outline", color="warning")
+                    ui.label(comment).classes("grow text-[12px] text-amber-10")
                     ui.button(icon="close", on_click=lambda index=index: self._remove_comment(state, index)).props(
                         "flat dense round size=sm"
                     ).tooltip("Apagar comentário").mark(f"remover-comentario-{state['id']}")
             with ui.row().classes("w-full items-center no-wrap gap-2"):
                 comment_input = ui.input("Comentário").props("dense").classes("grow").mark(f"comentario-{state['id']}")
                 comment_input.on("keydown.enter", lambda: self._add_comment(state, comment_input.value))
-                ui.button("Comentar", on_click=lambda: self._add_comment(state, comment_input.value)).props(
-                    "flat"
-                ).mark(f"comentar-{state['id']}")
+                ui.button(icon="send", on_click=lambda: self._add_comment(state, comment_input.value)).props(
+                    "flat dense round size=sm"
+                ).tooltip("Comentar").mark(f"comentar-{state['id']}")
 
     def _field(self, kind: type[ui.input], label: str, state: Any, key: str) -> ui.input:
         """An input for one of the state's texts, written to the plan as the teacher types."""

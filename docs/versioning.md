@@ -12,6 +12,8 @@ Each lesson folder is a local git repository (`.git/` inside the lesson), manage
 | The teacher edits code in the app and presses "Renderizar" | `Edição manual em fisica.py` |
 | The teacher edited the plan cards, before a message to the agent | `Edição manual em plano.yaml` |
 | An approval's turn ends well, and its comments leave the plan | `Comentários do plano atendidos` |
+| The teacher presses "Restaurar" with changes not yet in a version | `Edições antes de voltar a uma versão` |
+| "Restaurar" brings the lesson back to an earlier version | `Voltei para a versão de 19/11 às 14:32` |
 
 A turn or an edit that changes no file makes no commit. Each commit is a full snapshot of the lesson, so deleted files leave it too. The teacher's edits in the app commit only the files they changed, so the code tab and the plan cards never take each other's edits, nor ones made outside ManimFlow. A message that never reached the agent (Codex refuses the turn when its sandbox can't start) commits nothing. When a commit fails (say, a `.git/index.lock` left behind by a crash), the chat says so in Portuguese and goes on, and the next commit picks the changes up.
 
@@ -31,6 +33,14 @@ The list is written to `.git/info/exclude` every time the lesson opens, rather t
 `History.manual_changes()` returns the teacher's changes since the agent's last turn, committed or not, as a unified diff with paths relative to the lesson (`a/fisica.py`, `b/fisica.py`). The agent's own changes are never in it, and neither is `plano.yaml`: its changes reach the agent through "Aprovar plano". It goes to the agent with the teacher's next message, as the attachment `.manimflow/edicoes-manuais.diff`, so the agent builds on the fix instead of overwriting it. See [the code tab](code-tab.md).
 
 The agent's last turn is the ref `refs/manimflow/last-agent-turn`. Every turn moves it, including a turn that changed nothing, since that turn already received the diff with its message. A message that never reached the agent leaves it where it was, so the diff goes with the next one.
+
+## Restoring a version
+
+Every agent turn that saved a version ends, in the chat, with "Versão salva às 14:32" and "Restaurar". `History.restore(version)` first saves whatever the teacher changed since the last version, then writes every versioned file as it was in that version, removes the files added since, and commits the result as a new version. Nothing is lost: the versions after it stay in the history. Renders, caches and anything else not versioned stay as they are. The restore counts as the teacher's own edit, so the agent learns of it from the manual-edits diff with the next message.
+
+## The approved plan
+
+"Aprovar plano" records the plan as the agent left it after the approval's turn, as a SHA-256 digest in `.git/manimflow-plano-aprovado`. It lives in the history's folder so it moves with the lesson and never shows among the teacher's files. The lesson's status compares `plano.yaml` with it to tell whether the plan waits for the teacher (see [lessons](lessons.md#status)).
 
 ## Isolation from the teacher's Git
 

@@ -85,7 +85,7 @@ async def test_renderizar_keeps_the_files_line_endings(tmp_path):
 async def send(user, text, last):
     """Sends `text` to the agent and waits until its turn has ended, `last` being the turn's last text."""
     user.find(marker="message").type(text)
-    user.find("Enviar").click()
+    user.find(marker="send").click()
     # Each turn commits a version, which takes seconds on Windows.
     await user.should_see(last, retries=100)
     await user.should_not_see("O agente está trabalhando…", retries=100)
@@ -190,7 +190,7 @@ async def test_renderizar_waits_for_the_agent_to_finish_its_turn(tmp_path):
     async with open_lesson(lesson, scenario, delay=0.5) as (user, _):
         user.find("Código").click()
         user.find(marker="message").type("faça a animação")
-        user.find("Enviar").click()
+        user.find(marker="send").click()
 
         await user.should_see("Começando.", retries=20)
         assert not render_enabled(user)
