@@ -22,7 +22,7 @@ async def lesson_screen(agent, lesson):
 
 def send(user, text):
     user.find(marker="message").type(text)
-    user.find("Enviar").click()
+    user.find(marker="send").click()
 
 
 def texts(user, marker):
@@ -38,7 +38,7 @@ def texts(user, marker):
 
 async def past_sessions(user):
     """What the past-sessions list shows: the texts of each session's entry, in order."""
-    user.find("Conversas anteriores").click()
+    user.find("Anteriores").click()
     await user.should_see(marker="past-sessions")
     with user:
         return [
@@ -120,9 +120,9 @@ async def test_a_past_session_shows_its_messages_read_only(tmp_path):
             "Deixei a fonte maior.",
         ]
         with user:
-            # The settings dialog is empty until opened, so only the past session can hold inputs.
-            for dialog in user.find(ui.dialog).elements:
-                assert not [element for element in dialog.descendants() if isinstance(element, (ui.input, ui.textarea))]
+            (shown,) = user.find(marker="past-messages").elements
+            (dialog,) = [ancestor for ancestor in shown.ancestors() if isinstance(ancestor, ui.dialog)]
+            assert not [element for element in dialog.descendants() if isinstance(element, (ui.input, ui.textarea))]
         # The new session's chat is still empty: reading an old session doesn't resume it.
         assert texts(user, "conversation") == []
 

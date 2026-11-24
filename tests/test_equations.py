@@ -74,7 +74,7 @@ def physics(lesson, code):
 
 def send(user, text):
     user.find(marker="message").type(text)
-    user.find("Enviar").click()
+    user.find(marker="send").click()
 
 
 async def test_lesson_code_that_raises_shows_where_and_why_and_the_chat_keeps_working(lesson):

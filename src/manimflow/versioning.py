@@ -13,7 +13,10 @@ the teacher reads them. See docs/versioning.md.
   agent through "Aprovar plano".
 """
 
+import hashlib
 from collections.abc import Sequence
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 import pygit2
@@ -33,6 +36,10 @@ FIRST_VERSION = "Primeira versão da aula"
 OUTSIDE_EDITS = "Edições feitas fora do ManimFlow"
 
 _AUTHOR = ("ManimFlow", "manimflow@localhost")
+# The digest of plano.yaml as the teacher last approved it, kept in the history's folder
+# so it moves with the lesson and never shows among the teacher's files.
+_APPROVED_PLAN = "manimflow-plano-aprovado"
+RESTORED = "Voltei para a versão de {when}"
 # Points at the lesson as the agent last left it, whether its turn committed or not.
 _LAST_AGENT_TURN = "refs/manimflow/last-agent-turn"
 
@@ -108,6 +115,41 @@ class History:
             if patch is not None and PLAN_FILE not in (patch.delta.old_file.path, patch.delta.new_file.path)
         )
 
+    def approve_plan(self) -> None:
+        """Records plano.yaml as it is now as the plan the teacher approved."""
+        workdir = Path(self._repo.workdir)
+        approval_file(workdir).write_text(_digest(workdir / PLAN_FILE))
+
+    def versions(self) -> list["Version"]:
+        """The lesson's versions, newest first."""
+        if self._repo.head_is_unborn:
+            return []
+        return [
+            Version(str(commit.id), commit.message.strip(), datetime.fromtimestamp(commit.commit_time).astimezone())
+            for commit in self._repo.walk(self._repo.head.target)
+        ]
+
+    def restore(self, version: str) -> str | None:
+        """Brings the lesson's versioned files back to `version`, as a new version made by
+        the teacher, and returns its id, or None when nothing changed.
+
+        Files added since then are removed; renders and caches stay.
+        """
+        commit = self._repo.revparse_single(version).peel(pygit2.Commit)
+        # Whatever the teacher changed since the last version is kept in history first.
+        self._commit("Edições antes de voltar a uma versão")
+        workdir = Path(self._repo.workdir)
+        then = _files(commit.tree)
+        for path in _files(self._repo.head.peel(pygit2.Commit).tree):
+            if path not in then:
+                (workdir / path).unlink(missing_ok=True)
+        for path, blob in then.items():
+            target = workdir / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(self._repo[blob].peel(pygit2.Blob).data)
+        when = datetime.fromtimestamp(commit.commit_time).astimezone()
+        return self._commit(RESTORED.format(when=f"{when:%d/%m às %H:%M}"))
+
     def _commit(self, message: str, paths: Sequence[str] | None = None) -> str | None:
         """Commits the lesson's files as they are now, or only `paths` when given, unless
         nothing changed."""
@@ -138,3 +180,43 @@ class History:
 
     def _mark_agent_turn(self) -> None:
         self._repo.references.create(_LAST_AGENT_TURN, self._repo.head.target, force=True)
+
+
+@dataclass(frozen=True)
+class Version:
+    id: str
+    message: str
+    # Aware, in the teacher's time zone.
+    when: datetime
+
+
+def approval_file(lesson: Path) -> Path:
+    return lesson / ".git" / _APPROVED_PLAN
+
+
+def plan_approved(lesson: Path) -> bool:
+    """Whether plano.yaml is, byte for byte, the plan the teacher last approved."""
+    try:
+        approved = approval_file(lesson).read_text()
+    except OSError:
+        return False
+    return approved == _digest(lesson / PLAN_FILE)
+
+
+def _digest(path: Path) -> str:
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return ""
+
+
+def _files(tree: pygit2.Tree, prefix: str = "") -> dict[str, pygit2.Oid]:
+    """Every file in the tree, by its path, with its blob."""
+    found: dict[str, pygit2.Oid] = {}
+    for entry in tree:
+        path = f"{prefix}{entry.name}"
+        if entry.type_str == "tree":
+            found.update(_files(entry, f"{path}/"))  # type: ignore[arg-type]
+        else:
+            found[path] = entry.id
+    return found

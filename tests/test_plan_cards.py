@@ -36,7 +36,7 @@ def cards(user):
             elif isinstance(element, ui.image):
                 path = element.source.split("?")[0]
                 shown.append(f"imagem {path[path.index('/saida/') + 1 :]}")
-            elif isinstance(element, ui.label):
+            elif isinstance(element, ui.label) and "plan-hint" not in element._markers:
                 shown.append(element.text)
         return shown
 
@@ -167,7 +167,7 @@ async def test_approving_sends_one_message_with_the_plan_changes_and_every_comme
         user.find(marker="comentario-S0").type("O azul está escuro demais.")
         user.find(marker="comentar-S0").click()
 
-        user.find("Aprovar plano").click()
+        user.find(marker="approve-plan").click()
 
         await user.should_see("Vou seguir o plano.", retries=TURN)
         assert messages(agent) == [
@@ -207,7 +207,7 @@ async def test_approving_an_untouched_plan_says_so(lesson):
     )
     agent = ScriptedAgent([[AssistantText("Vou seguir o plano.")]])
     async with open_lesson(lesson, agent) as user:
-        user.find("Aprovar plano").click()
+        user.find(marker="approve-plan").click()
 
         await user.should_see("Vou seguir o plano.", retries=TURN)
     assert messages(agent) == ["Aprovei o plano como está, sem mudanças nem comentários."]
@@ -219,7 +219,7 @@ async def test_approving_keeps_the_rest_of_the_plan_file_as_it_was(example):
     async with open_lesson(example, agent) as user:
         user.find(marker="comentario-S5").type("Mais devagar.")
         user.find(marker="comentar-S5").click()
-        user.find("Aprovar plano").click()
+        user.find(marker="approve-plan").click()
 
         await user.should_see("Vou seguir o plano.", retries=TURN)
     assert (example / "plano.yaml").read_text(encoding="utf-8") == before.replace(
@@ -231,9 +231,9 @@ async def test_approving_while_the_agent_works_sends_nothing_and_keeps_the_comme
     agent = ScriptedAgent([[AssistantText("Pronto.")]], delay=0.3)
     async with open_lesson(lesson, agent) as user:
         user.find(marker="message").type("oi")
-        user.find("Enviar").click()
+        user.find(marker="send").click()
 
-        user.find("Aprovar plano").click()
+        user.find(marker="approve-plan").click()
 
         await user.should_see("Espere o agente terminar para aprovar o plano.", retries=TURN)
         await user.should_see("Pronto.", retries=TURN)
@@ -263,7 +263,7 @@ async def test_the_cards_follow_a_plan_the_agent_writes(lesson):
         await user.should_not_see("Aprovar plano")
 
         user.find(marker="message").type("faz um plano")
-        user.find("Enviar").click()
+        user.find(marker="send").click()
 
         await eventually(lambda: cards(user)[:3] == ["Plano", "A", "Título: Antes"])
         await user.should_see("Aprovar plano", retries=TURN)
@@ -275,11 +275,11 @@ async def test_an_approval_after_the_agent_rewrote_the_plan_only_reports_the_tea
     )
     async with open_lesson(lesson, agent) as user:
         user.find(marker="message").type("refaz o plano")
-        user.find("Enviar").click()
+        user.find(marker="send").click()
         await eventually(lambda: "Título: Antes" in cards(user))
 
         edit(user, "titulo-B", "Depois de andar")
-        user.find("Aprovar plano").click()
+        user.find(marker="approve-plan").click()
 
         await user.should_see("Sigo.", retries=TURN)
     assert messages(agent)[1] == (
@@ -372,7 +372,7 @@ async def test_approving_a_plan_the_agent_just_rewrote_does_not_overwrite_it(les
     async with open_lesson(lesson, agent) as user:
         # The agent's new plan lands between two looks at the file.
         (lesson / "plano.yaml").write_text(TWO_STATES, encoding="utf-8")
-        user.find("Aprovar plano").click()
+        user.find(marker="approve-plan").click()
 
         await user.should_see("O plano mudou. Confira os cartões e aprove de novo.", retries=TURN)
         assert messages(agent) == []
@@ -394,15 +394,15 @@ async def test_approving_again_after_the_agent_failed_resends_the_changes_and_co
     agent = ScriptedAgent([[AgentError("Sem conexão.")], [RuntimeError("engine crashed")], [AssistantText("Sigo.")]])
     async with open_lesson(lesson, agent) as user:
         edit(user, "titulo-S1", "Quadrado na direita")
-        user.find("Aprovar plano").click()
+        user.find(marker="approve-plan").click()
         await user.should_see("Erro do agente: Sem conexão.", retries=TURN)
 
-        user.find("Aprovar plano").click()
+        user.find(marker="approve-plan").click()
         await user.should_see("O agente parou por um erro inesperado.", retries=TURN)
 
         user.find(marker="comentario-S0").type("Mais azul.")
         user.find(marker="comentar-S0").click()
-        user.find("Aprovar plano").click()
+        user.find(marker="approve-plan").click()
         await user.should_see("Sigo.", retries=TURN)
 
     first, second, third = messages(agent)
@@ -446,7 +446,7 @@ async def test_an_edit_keeps_the_plan_file_line_endings(lesson):
 async def test_the_comments_of_an_approval_that_failed_stay_in_the_plan(lesson):
     agent = ScriptedAgent([[AgentError("Sem conexão.")]])
     async with open_lesson(lesson, agent) as user:
-        user.find("Aprovar plano").click()
+        user.find(marker="approve-plan").click()
         await user.should_see("Erro do agente: Sem conexão.", retries=TURN)
 
         assert "Talvez deslocar mais." in cards(user)
@@ -464,7 +464,7 @@ async def test_an_approval_commits_the_card_edits_apart_and_sends_the_plan_diff_
     agent = ScriptedAgent([[EditFile("CONTEXTO.md", "# Contexto\n"), AssistantText("Vou seguir o plano.")]])
     async with open_lesson(lesson, agent) as user:
         edit(user, "titulo-S1", "Quadrado na direita")
-        user.find("Aprovar plano").click()
+        user.find(marker="approve-plan").click()
         await user.should_see("Vou seguir o plano.", retries=TURN)
 
     (approval,) = agent.received
@@ -484,7 +484,7 @@ async def test_a_message_with_card_edits_not_yet_approved_carries_no_plan_diff(l
         user.find(marker="comentario-S0").type("Mais azul.")
         user.find(marker="comentar-S0").click()
         user.find(marker="message").type("deixe o fundo branco")
-        user.find("Enviar").click()
+        user.find(marker="send").click()
         await user.should_see("Pronto.", retries=TURN)
 
     (message,) = agent.received

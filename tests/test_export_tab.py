@@ -14,7 +14,7 @@ from manimflow.fake_agent import ScriptedAgent
 async def open_export_tab(lesson):
     async with user_simulation(root=lesson_page(ScriptedAgent([]), lesson)) as user:
         await user.open("/")
-        user.find(kind=ui.tab, content="Exportar").click()
+        user.find(marker="open-export").click()
         yield user
 
 

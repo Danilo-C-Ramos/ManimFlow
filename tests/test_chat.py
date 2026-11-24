@@ -1,11 +1,12 @@
 from contextlib import asynccontextmanager
 
+import pygit2
 from nicegui import ui
 from nicegui.testing.user_simulation import user_simulation
 
 from manimflow.agent import AgentError, AssistantText, CommandFinished, CommandStarted, ImageViewed
 from manimflow.app import lesson_page
-from manimflow.fake_agent import EditFile, ScriptedAgent
+from manimflow.fake_agent import EditFile, Produce, ScriptedAgent
 
 
 @asynccontextmanager
@@ -18,24 +19,37 @@ async def open_lesson(lesson, scenario, delay=0.0):
 
 def send(user, text):
     user.find(marker="message").type(text)
-    user.find("Enviar").click()
+    user.find(marker="send").click()
+
+
+# What closes a turn: the cards of what it produced and the saved version.
+AFTER_TURN = {"checkpoint", "result-plan", "result-preview", "result-code"}
 
 
 def conversation(user):
-    """The text of every chat entry, in the order the page shows them."""
+    """The text of every chat entry, in the order the page shows them, without what closes
+    each turn (see `after_turn`)."""
     with user:
         (column,) = user.find(marker="conversation").elements
         return [
             element.text if isinstance(element, ui.label) else element.content
             for element in column.descendants()
             if isinstance(element, (ui.label, ui.markdown))
+            and not any(AFTER_TURN & set(ancestor._markers) for ancestor in element.ancestors())
         ]
+
+
+def after_turn(user):
+    """The marker of each card and saved version that closes a turn, in page order."""
+    with user:
+        (column,) = user.find(marker="conversation").elements
+        return [marker for element in column.descendants() for marker in element._markers if marker in AFTER_TURN]
 
 
 def input_enabled(user):
     with user:
         (field,) = user.find(marker="message").elements
-        (button,) = user.find("Enviar").elements
+        (button,) = user.find(marker="send").elements
         return field.enabled and button.enabled
 
 
@@ -179,3 +193,135 @@ async def test_an_empty_message_is_not_sent(tmp_path):
 
         await user.should_not_see("Oi.")
         assert conversation(user) == []
+
+
+PLAN = """estados:
+  - id: S0
+    titulo: Partida
+    visivel: As duas linhas de mundo na Terra.
+    cena: S0
+  - id: S1
+    titulo: Ida
+    visivel: A irmã até a estrela.
+    cena: T01
+transicoes:
+  - de: S0
+    para: S1
+    descricao: A irmã viaja.
+    duracao: 4
+    cena: T01
+"""
+
+SCENES = """from manim import Scene
+
+
+class S0(Scene):
+    def construct(self):
+        pass
+
+
+class T01(Scene):
+    def construct(self):
+        pass
+"""
+
+
+def texts_in(user, marker):
+    with user:
+        return [
+            element.text
+            for found in user.find(marker=marker).elements
+            for element in found.descendants()
+            if isinstance(element, ui.label)
+        ]
+
+
+async def test_a_turn_that_writes_the_plan_shows_it_inline_and_saves_a_version(tmp_path):
+    scenario = [[EditFile("cenas.py", SCENES), EditFile("plano.yaml", PLAN), AssistantText("Montei o plano.")]]
+    async with open_lesson(tmp_path, scenario) as user:
+        send(user, "aula sobre os gêmeos")
+        await user.should_see("Montei o plano.")
+        await user.should_see(marker="checkpoint")
+
+        assert after_turn(user) == ["result-plan", "result-code", "checkpoint"]
+        assert texts_in(user, "result-plan") == [
+            "Plano · 2 estados, 1 transição",
+            "S0",
+            "Partida",
+            "As duas linhas de mundo na Terra.",
+            "↓ 4 s",
+            "S1",
+            "Ida",
+            "A irmã até a estrela.",
+        ]
+
+
+async def test_a_turn_that_renders_shows_the_new_previews(tmp_path):
+    (tmp_path / "plano.yaml").write_text(PLAN, encoding="utf-8")
+    (tmp_path / "cenas.py").write_text(SCENES, encoding="utf-8")
+    scenario = [
+        [
+            CommandStarted("1", "manimflow preview . S0"),
+            Produce("saida/previa/png/S0.png", b"S0"),
+            CommandFinished("1", "manimflow preview . S0", 0),
+            AssistantText("Renderizei."),
+        ]
+    ]
+    async with open_lesson(tmp_path, scenario) as user:
+        send(user, "renderiza")
+        await user.should_see(marker="result-preview")
+
+        # Renders aren't versioned, so the turn changed no versioned file.
+        assert after_turn(user) == ["result-preview"]
+        assert texts_in(user, "result-preview") == ["Prévia atualizada", "Abrir →"]
+
+
+async def test_a_turn_that_changes_nothing_saves_no_version(tmp_path):
+    async with open_lesson(tmp_path, [[AssistantText("Nada a mudar.")]]) as user:
+        send(user, "está bom?")
+        await user.should_see("Nada a mudar.")
+        await user.should_not_see(marker="checkpoint")
+
+
+async def test_restaurar_brings_the_files_back_to_that_version_as_a_new_one(tmp_path):
+    scenario = [
+        [EditFile("cenas.py", "# primeira\n"), AssistantText("Primeira.")],
+        [EditFile("cenas.py", "# segunda\n"), EditFile("extra.py", "x = 1\n"), AssistantText("Segunda.")],
+    ]
+    async with open_lesson(tmp_path, scenario) as user:
+        send(user, "faz a primeira")
+        await user.should_see("Primeira.")
+        await user.should_see(marker="checkpoint")
+        send(user, "faz a segunda")
+        await user.should_see("Segunda.")
+
+        user.find(marker="restore").click()
+        user.find(marker="confirm-restore").click()
+
+        await user.should_see("A aula voltou para a versão", retries=50)
+    assert (tmp_path / "cenas.py").read_text(encoding="utf-8") == "# primeira\n"
+    assert not (tmp_path / "extra.py").exists()
+    repo = pygit2.Repository(str(tmp_path / ".git"))
+    assert repo[repo.head.target].message.startswith("Voltei para a versão de ")
+
+
+async def test_enter_sends_the_message(tmp_path):
+    async with open_lesson(tmp_path, [[AssistantText("Recebi.")]]) as user:
+        user.find(marker="message").type("oi").trigger("keydown.enter.exact.prevent")
+        await user.should_see("Recebi.")
+
+
+async def test_the_preview_closes_so_the_chat_takes_the_page_and_a_card_opens_it_on_its_tab(tmp_path):
+    scenario = [[EditFile("cenas.py", SCENES), EditFile("plano.yaml", PLAN), AssistantText("Montei o plano.")]]
+    async with open_lesson(tmp_path, scenario) as user:
+        user.find(marker="close-workspace").click()
+        await user.should_see(marker="show-workspace")
+
+        send(user, "aula sobre os gêmeos")
+        await user.should_see(marker="result-plan")
+        user.find(marker="result-plan").click()
+
+        await user.should_not_see(marker="show-workspace")
+        with user:
+            (tabs,) = user.find(marker="workspace-tabs").elements
+            assert tabs.value == "Plano"

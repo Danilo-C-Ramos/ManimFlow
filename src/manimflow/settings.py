@@ -47,16 +47,20 @@ async def model_switch(agent: Agent) -> ModelSwitch:
 
 
 class SettingsDialog:
-    """A gear button that opens the settings, read fresh from the agent each time."""
+    """The settings, read fresh from the agent each time they open; with `button`, a gear
+    button that opens them. `switch` follows a model picked in "Avançado"."""
 
-    def __init__(self, agent: Agent, switch: ModelSwitch, on_signed_out: Callable[[], None]) -> None:
+    def __init__(
+        self, agent: Agent, switch: ModelSwitch | None, on_signed_out: Callable[[], None], button: bool = True
+    ) -> None:
         self.agent = agent
         self.switch = switch
         self.on_signed_out = on_signed_out
         self.dialog = ui.dialog()
-        ui.button(icon="settings", on_click=self.open).props("flat round color=white").tooltip(
-            "Configurações"
-        ).mark("open-settings")
+        if button:
+            ui.button(icon="settings", on_click=self.open).props("flat round dense color=grey-7").tooltip("Configurações").mark(
+                "open-settings"
+            )
 
     async def open(self) -> None:
         account = await self.agent.account()
@@ -105,7 +109,9 @@ def _signed_in_as(account: Account) -> str:
 class AdvancedSettings:
     """Picks the model and the reasoning effort by hand, among those the account offers."""
 
-    def __init__(self, agent: Agent, models: list[ModelOption], current: ModelSettings, switch: ModelSwitch) -> None:
+    def __init__(
+        self, agent: Agent, models: list[ModelOption], current: ModelSettings, switch: ModelSwitch | None
+    ) -> None:
         self.agent = agent
         self.switch = switch
         self.models = {option.model: option for option in models}
@@ -140,7 +146,8 @@ class AdvancedSettings:
     async def _apply(self) -> None:
         settings = ModelSettings(self.model.value, self.effort.value)
         await self.agent.set_model_settings(settings)
-        self.switch.show(settings)
+        if self.switch is not None:
+            self.switch.show(settings)
 
 
 def _quota_row(window: QuotaWindow) -> None:
@@ -148,7 +155,7 @@ def _quota_row(window: QuotaWindow) -> None:
         with ui.row().classes("w-full items-baseline justify-between"):
             ui.label(f"{_limit_name(window.minutes)}: {window.used_percent}% usado")
             if window.resets_at is not None:
-                ui.label(_resets(window.resets_at)).classes("text-caption text-grey-7")
+                ui.label(renews(window.resets_at)).classes("text-caption text-grey-7")
         color = "negative" if window.used_percent >= 90 else "primary"
         ui.linear_progress(window.used_percent / 100, show_value=False, color=color)
 
@@ -170,7 +177,8 @@ def _limit_name(minutes: int | None) -> str:
     return f"Limite de {minutes} minutos"
 
 
-def _resets(when: datetime) -> str:
+def renews(when: datetime) -> str:
+    """When a usage limit starts over, such as "renova às 14:30"."""
     local = when.astimezone()
     if local.date() == datetime.now().astimezone().date():
         return f"renova às {local:%H:%M}"

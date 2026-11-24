@@ -7,7 +7,7 @@ from datetime import datetime
 
 import pygit2
 import pytest
-from nicegui import ui
+from nicegui import ElementFilter, ui
 from nicegui.testing.user_simulation import user_simulation
 
 from manimflow.agent import AssistantText
@@ -18,8 +18,13 @@ from conftest import EXAMPLE, FIXTURES
 
 
 @pytest.fixture
-def library(tmp_path) -> Library:
-    """ManimFlow's own folder in `tmp_path / "dados"`, with the lessons in `tmp_path / "Aulas"`."""
+def library(tmp_path, monkeypatch) -> Library:
+    """ManimFlow's own folder in `tmp_path / "dados"`, with the lessons in `tmp_path / "Aulas"`.
+
+    The default lessons folder is in `tmp_path` too, so a profile in the real one never
+    comes along.
+    """
+    monkeypatch.setattr("manimflow.lessons.documents_dir", lambda: tmp_path / "Documentos")
     library = Library(tmp_path / "dados")
     library.set_folder(tmp_path / "Aulas")
     return library
@@ -49,18 +54,51 @@ def labels(user, marker):
         return [element.text for element in container.descendants() if isinstance(element, (ui.label, ui.link))]
 
 
+def links(user, marker):
+    """The text of every link inside the element marked `marker`, in page order."""
+    with user:
+        (container,) = user.find(marker=marker).elements
+        return [element.text for element in container.descendants() if isinstance(element, ui.link)]
+
+
+def href(user, text, within):
+    """Where the link with this text, inside the element marked `within`, leads."""
+    with user:
+        (link,) = [
+            link
+            for link in ElementFilter(kind=ui.link)
+            if text in {link.text} | {child.text for child in link.descendants() if isinstance(child, ui.label)}
+            and within in {marker for ancestor in link.ancestors() for marker in ancestor._markers}
+        ]
+    return link.props["href"]
+
+
+def card(user, name):
+    """The texts of the lesson card with this name."""
+    with user:
+        for element in user.find(marker="lesson-card").elements:
+            texts = [child.text for child in element.descendants() if isinstance(child, (ui.label, ui.link))]
+            if name in texts:
+                return texts
+    raise AssertionError(f"No card for {name}")
+
+
 async def test_lists_the_lessons_in_the_folder_with_last_edit_and_states(library):
     add_lesson(library.folder, "Aula 09 - Minkowski", datetime(2026, 10, 5, 14, 30))
     add_lesson(library.folder, "Aula 10 - Gêmeos", datetime(2026, 10, 12, 9, 0))
     (library.folder / "Rascunhos").mkdir()
 
     async with open_home(library) as user:
-        await user.should_see("Minhas aulas")
-        assert labels(user, "lessons") == [
-            "Aula 10 - Gêmeos",
-            "editada em 12/10/2026 · 2 estados",
+        await user.should_see("O que vamos animar hoje?")
+        assert links(user, "lessons") == ["Aula 10 - Gêmeos", "Aula 09 - Minkowski"]
+        # Nothing rendered and the plan never approved: the agent wrote it and waits.
+        assert card(user, "Aula 09 - Minkowski") == [
+            "sem prévia ainda",
             "Aula 09 - Minkowski",
-            "editada em 05/10/2026 · 2 estados",
+            "●",
+            "Plano para aprovar",
+            "em 05/10/2026",
+            "2 estados",
         ]
 
 
@@ -71,7 +109,7 @@ def history(lesson):
 
 
 def create_lesson(user, name):
-    user.find(kind=ui.button, content="+ Nova aula").click()
+    user.find(marker="new-lesson").click()
     user.find(marker="lesson-name-input").type(name)
     user.find("Criar").click()
 
@@ -99,17 +137,17 @@ async def test_the_new_lesson_shows_up_on_the_home(library):
         await user.should_see(marker="message")
 
         await user.open("/")
-        assert labels(user, "lessons")[0] == "Aula 11 - Óptica"
+        assert links(user, "lessons")[0] == "Aula 11 - Óptica"
 
 
 async def test_a_lesson_card_opens_the_lesson_and_the_lesson_leads_back_home(library):
     add_lesson(library.folder, "Aula 09 - Minkowski", datetime(2026, 10, 5, 14, 30))
     async with open_home(library) as user:
-        user.find(kind=ui.link, content="Aula 09 - Minkowski").click()
+        await user.open(href(user, "Aula 09 - Minkowski", within="lesson-card"))
         await user.should_see(marker="message")
 
-        user.find(kind=ui.button, content="Minhas aulas").click()
-        await user.should_see("+ Nova aula")
+        await user.open(href(user, "ManimFlow", within="sidebar-top"))
+        await user.should_see("O que vamos animar hoje?")
 
 
 async def test_an_address_outside_the_lessons_folder_opens_no_lesson(library, tmp_path):
@@ -148,7 +186,7 @@ async def test_the_example_has_its_own_strip_and_never_shows_among_the_lessons(l
     add_lesson(library.folder, "Aula 09 - Minkowski", datetime(2026, 10, 5))
     async with open_home(library) as user:
         await user.should_see("Exemplo · Relatividade - herói e espelho")
-        assert labels(user, "lessons")[::2] == ["Aula 09 - Minkowski"]
+        assert links(user, "lessons") == ["Aula 09 - Minkowski"]
 
 
 async def test_opening_the_example_works_on_a_copy_and_leaves_the_bundled_one_alone(library):
@@ -160,7 +198,7 @@ async def test_opening_the_example_works_on_a_copy_and_leaves_the_bundled_one_al
         await user.should_see("Relatividade - herói e espelho")
 
         user.find(marker="message").type("muda tudo")
-        user.find("Enviar").click()
+        user.find(marker="send").click()
         await user.should_see("Arquivo alterado: cenas.py")
 
     assert snapshot(EXAMPLE) == bundled
@@ -203,11 +241,11 @@ async def test_the_lessons_folder_can_be_changed_and_the_choice_persists(library
         change_folder(user, synced)
 
         await user.should_see(f"Pasta das aulas: {synced}")
-        assert labels(user, "lessons")[::2] == ["Aula 12 - Doppler"]
+        assert links(user, "lessons") == ["Aula 12 - Doppler"]
 
     async with open_home(Library(library.data)) as user:
         await user.should_see(f"Pasta das aulas: {synced}")
-        assert labels(user, "lessons")[::2] == ["Aula 12 - Doppler"]
+        assert links(user, "lessons") == ["Aula 12 - Doppler"]
 
 
 async def test_a_new_lessons_folder_is_created(library, tmp_path):
@@ -295,7 +333,7 @@ async def test_a_new_lesson_renders_and_its_physics_test_passes(library, manimfl
 
 async def test_an_empty_folder_says_where_to_start(library):
     async with open_home(library) as user:
-        assert labels(user, "lessons") == ['Nenhuma aula nesta pasta ainda. Comece por "+ Nova aula".']
+        assert labels(user, "lessons") == ["Nenhuma aula fora das turmas. Comece pela caixa de mensagem acima."]
 
 
 async def test_a_lesson_with_a_percent_sign_in_its_name_opens(library):
@@ -311,7 +349,7 @@ async def test_the_teachers_changes_to_the_example_and_its_history_outlive_a_rel
         user.find("Abrir o exemplo").click()
         await user.should_see(marker="message")
         user.find(marker="message").type("muda tudo")
-        user.find("Enviar").click()
+        user.find(marker="send").click()
         await user.should_see("Mudei.", retries=100)
         await user.should_not_see("O agente está trabalhando…", retries=100)
 
@@ -331,13 +369,13 @@ async def test_the_lesson_screen_lists_the_lessons_and_switches_to_another(libra
     add_lesson(library.folder, "Aula 10 - Gêmeos", datetime(2026, 10, 6))
     async with open_home(library) as user:
         await user.open(lesson_url("Aula 09 - Minkowski"))
-        await user.should_see(marker="lesson-list", retries=100)
-        assert labels(user, "lesson-list") == ["Aulas", "Aula 10 - Gêmeos", "Aula 09 - Minkowski", "Exemplo"]
+        await user.should_see(marker="loose-lessons", retries=100)
+        assert links(user, "loose-lessons") == ["Aula 10 - Gêmeos", "Aula 09 - Minkowski"]
         with user:
             (current,) = user.find(marker="current-lesson").elements
             assert current.text == "Aula 09 - Minkowski"
 
-        user.find(kind=ui.link, content="Aula 10 - Gêmeos").click()
+        await user.open(lesson_url("Aula 10 - Gêmeos"))
         await user.should_see(marker="current-lesson", content="Aula 10 - Gêmeos", retries=100)
 
 
@@ -345,7 +383,7 @@ async def test_a_new_lesson_can_be_started_from_the_lesson_screen(library):
     add_lesson(library.folder, "Aula 09 - Minkowski", datetime(2026, 10, 5))
     async with open_home(library) as user:
         await user.open(lesson_url("Aula 09 - Minkowski"))
-        await user.should_see(marker="lesson-list", retries=100)
+        await user.should_see(marker="loose-lessons", retries=100)
         create_lesson(user, "Aula 11 - Óptica")
 
         await user.should_see(marker="current-lesson", content="Aula 11 - Óptica", retries=100)

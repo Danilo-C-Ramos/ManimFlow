@@ -51,7 +51,7 @@ Two neighbouring states without a transition between them are a plain slide chan
 
 ## Plan cards in the app
 
-The lesson screen draws the plan as one card per state, with each transition's approximate duration and description between the cards. Once a state's scene is rendered, its card shows the image, so the cards also serve as the lesson's timeline.
+The lesson screen's "Plano" tab draws the plan as one card per state, side by side, with each transition's approximate duration and description between the cards. Once a state's scene is rendered, its card shows the image, so the cards also serve as the lesson's timeline.
 
 The teacher's changes go straight to `plano.yaml`, and the file stays valid. They are committed as `Edição manual em plano.yaml` when the next turn starts:
 
@@ -61,7 +61,7 @@ The teacher's changes go straight to `plano.yaml`, and the file stays valid. The
 
 The file is written back with its YAML comments and blank lines in place.
 
-**"Aprovar plano"** sends the agent one message with a diff of `plano.yaml` since the agent last wrote it (comments left out) and every comment, each with its state. Once the turn ends well, the comments it carried are removed from the file, since the agent has them. After a failed turn they stay, so the next approval sends them again. A new lesson's placeholder plan (states on the scaffold's empty `S0_Inicio` scene, no transitions) has no "Aprovar plano" button: the agent writes the first plan. When the agent rewrites `plano.yaml`, the cards redraw and the next diff starts from the agent's version.
+**"Aprovar plano"** sends the agent one message with a diff of `plano.yaml` since the agent last wrote it (comments left out) and every comment, each with its state. Once the turn ends well, the comments it carried are removed from the file, since the agent has them. After a failed turn they stay, so the next approval sends them again. A new lesson's placeholder plan (states on the scaffold's empty `S0_Inicio` scene, no transitions) has no "Aprovar plano" button: the agent writes the first plan. When the agent rewrites `plano.yaml`, the cards redraw and the next diff starts from the agent's version. While the plan waits for the teacher, the message box offers "Aprovar plano" too ([the lesson screen](lesson-screen.md#the-message-box)), and an approval that went well marks the plan as approved ([versioning](versioning.md#the-approved-plan)).
 
 ## Validation
 

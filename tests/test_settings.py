@@ -40,7 +40,7 @@ async def should_have(user, marker, **attributes):
 
 async def send(user, text, reply):
     user.find(marker="message").type(text)
-    user.find("Enviar").click()
+    user.find(marker="send").click()
     await user.should_see(reply)
 
 

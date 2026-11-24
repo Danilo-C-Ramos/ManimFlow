@@ -1,4 +1,5 @@
-"""The lesson's export tab: pick a preset, adjust its settings and run `manimflow export`."""
+"""The lesson's export dialog: pick a preset, adjust its settings and run `manimflow export`,
+with the lesson's previous exports listed to open or redo."""
 
 import asyncio
 import json
@@ -8,12 +9,15 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from nicegui import ui
 from PIL import ImageColor
 
+from manimflow import activity
 from manimflow.cli import MAX_FPS, MAX_RESOLUTION
 from manimflow.export import PRESETS
 from manimflow.render import OUTPUT_DIR
@@ -37,11 +41,79 @@ _NAMES = {
 ASPECT_RATIOS = ["16:9", "16:10", "4:3", "1:1"]
 
 
-class ExportPanel:
+class ExportDialog:
+    """The export panel in a dialog, with the lesson's previous exports above it."""
+
     def __init__(self, lesson: Path) -> None:
         self.lesson = lesson
+        with ui.dialog() as self.dialog, ui.card().classes("w-[52rem] max-w-full items-stretch gap-4"):
+            with ui.row().classes("w-full items-center justify-between"):
+                ui.label("Exportar a aula").classes("text-lg font-semibold")
+                ui.button(icon="close", on_click=self.dialog.close).props("flat round dense")
+            self.previous = ui.column().classes("w-full gap-1").mark("previous-exports")
+            self.panel = ExportPanel(lesson, on_done=self._show_previous)
+        self._show_previous()
+
+    def open(self, preset: str | None = None) -> None:
+        if preset is not None:
+            self.panel.preset.value = preset
+        self._show_previous()
+        self.dialog.open()
+
+    def _show_previous(self) -> None:
+        self.previous.clear()
+        exports = previous_exports(self.lesson)
+        if not exports:
+            return
+        with self.previous:
+            ui.label("Exportações anteriores").classes("text-sm font-medium")
+            for preset, folder, count, when in exports:
+                with ui.row().classes("w-full items-center no-wrap gap-3 mf-card px-3 py-2").mark("previous-export"):
+                    ui.label(_NAMES[preset].title).classes("font-medium")
+                    ui.label(f"{count} arquivo" + ("" if count == 1 else "s") + f" · {when:%d/%m às %H:%M}").classes(
+                        "text-[13px] mf-muted grow"
+                    )
+                    ui.button("Abrir pasta", on_click=lambda folder=folder: _open(self.lesson, folder)).props(
+                        "flat dense no-caps"
+                    )
+                    ui.button("Exportar de novo", on_click=lambda preset=preset: self._again(preset)).props(
+                        "flat dense no-caps"
+                    )
+
+    async def _again(self, preset: str) -> None:
+        self.panel.preset.value = preset
+        await self.panel.run()
+
+
+def previous_exports(lesson: Path) -> list[tuple[str, Path, int, datetime]]:
+    """Each preset the lesson was exported with: its folder, number of files and last export."""
+    found = []
+    for preset in PRESETS:
+        folder = lesson / OUTPUT_DIR / preset
+        try:
+            files = [path for path in folder.iterdir() if path.is_file()]
+        except OSError:
+            continue
+        if files:
+            when = datetime.fromtimestamp(max(path.stat().st_mtime for path in files))
+            found.append((preset, folder, len(files), when))
+    return sorted(found, key=lambda export: export[3], reverse=True)
+
+
+def _open(lesson: Path, folder: Path) -> None:
+    activity.seen_export(lesson)
+    try:
+        open_in_file_manager(folder)
+    except Exception:
+        logger.exception("Could not open %s", folder)
+        ui.notify(f"Não foi possível abrir a pasta. Os arquivos estão em {folder}", type="negative")
+
+
+class ExportPanel:
+    def __init__(self, lesson: Path, on_done: Callable[[], None] = lambda: None) -> None:
+        self.lesson = lesson
+        self.on_done = on_done
         with ui.column().classes("w-full gap-3").mark("export"):
-            ui.label("Exportar").classes("text-lg")
             self.preset = ui.radio(
                 {name: _NAMES[name].title for name in PRESETS}, value="powerpoint", on_change=self._use_defaults
             ).mark("export-preset")
@@ -77,16 +149,20 @@ class ExportPanel:
         started = time.monotonic()
         ticker = ui.timer(1, lambda: self._show_progress(time.monotonic() - started))
         self._show_progress(0)
+        activity.start(self.lesson)
         try:
             report = await self._export()
         finally:
+            activity.stop(self.lesson)
             ticker.cancel()
             self._set_busy(False)
         with self.result:
             if report.get("ok"):
-                _show_files(report["files"], folder)
+                activity.exported(self.lesson, self.preset.value, folder)
+                _show_files(report["files"], self.lesson, folder)
             else:
                 _show_failure(report)
+        self.on_done()
 
     async def _export(self) -> dict:
         """Runs the CLI and returns its JSON report, or a report of why there is none."""
@@ -188,20 +264,14 @@ def _problems(max_fps: int | None, resolution: float | None, fps: float | None, 
     return problems
 
 
-def _show_files(files: list[str], folder: Path) -> None:
+def _show_files(files: list[str], lesson: Path, folder: Path) -> None:
     ui.label("Arquivos exportados").classes("text-positive")
     with ui.column().classes("gap-0").mark("exported-files"):
         for file in files:
             ui.label(Path(file).name).classes("font-mono")
-
-    def open_folder() -> None:
-        try:
-            open_in_file_manager(folder)
-        except Exception:
-            logger.exception("Could not open %s", folder)
-            ui.notify(f"Não foi possível abrir a pasta. Os arquivos estão em {folder}", type="negative")
-
-    ui.button("Abrir pasta", icon="folder_open", on_click=open_folder).props("outline")
+    ui.button("Abrir pasta", icon="folder_open", on_click=lambda: _open(lesson, folder)).props("outline").mark(
+        "open-exported-folder"
+    )
 
 
 def open_in_file_manager(folder: Path) -> None:

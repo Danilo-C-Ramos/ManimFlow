@@ -24,7 +24,7 @@ class SessionHistory:
         self.current = current
         with ui.dialog() as self.dialog, ui.card().classes("w-full max-w-2xl"):
             self.content = ui.column().classes("w-full gap-2")
-        ui.button("Conversas anteriores", icon="history", on_click=self.show_list).props("flat color=white")
+        ui.button("Anteriores", icon="history", on_click=self.show_list).props("flat dense no-caps")
 
     async def show_list(self) -> None:
         self.dialog.open()

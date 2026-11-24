@@ -50,7 +50,8 @@ async def test_the_example_opens_from_manimflows_folder_and_keeps_the_teachers_c
     # Codex's Windows sandbox never lets the agent into the temp folder.
     example = tmp_path / "dados" / "ManimFlow" / "exemplo" / "Relatividade - herói e espelho"
     launch(monkeypatch, tmp_path, "--demo")
-    assert sorted(path.name for path in example.iterdir()) == sorted(path.name for path in EXAMPLE.iterdir())
+    # With its own history, which ManimFlow keeps in it.
+    assert sorted(path.name for path in example.iterdir()) == sorted([".git", *(path.name for path in EXAMPLE.iterdir())])
     (example / "rascunho.md").write_text("da última vez", encoding="utf-8")
 
     launch(monkeypatch, tmp_path, "--demo")
@@ -69,7 +70,7 @@ async def test_demo_opens_a_copy_of_the_bundled_example_with_the_scripted_agent(
         await user.should_see("Relatividade - herói e espelho")
 
         user.find(marker="message").type("muda a cor da luz")
-        user.find("Enviar").click()
+        user.find(marker="send").click()
         await user.should_see("Arquivo criado: rascunho.md", retries=50)
 
     assert sorted(path.name for path in EXAMPLE.iterdir()) == bundled
