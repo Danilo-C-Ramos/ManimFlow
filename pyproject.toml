@@ -33,9 +33,11 @@ dev = [
 ]
 
 # The version comes from the git tag: `v0.0.2` builds 0.0.2. Any other commit builds a
-# version with a local part, such as 0.0.3.dev1+g1a2b3c4, which PyPI refuses.
+# version with a local part, such as 0.0.3.dev1+g1a2b3c4, which PyPI refuses. A copy
+# without git, such as GitHub's "Download ZIP", builds 0.0.0.
 [tool.hatch.version]
 source = "vcs"
+fallback-version = "0.0.0"
 
 [tool.uv]
 # Rebuild the installed package's metadata when the commit or tag changes its version.
