@@ -102,6 +102,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     doctor_command.add_argument("--json", action="store_true", help="print a JSON report")
 
+    account = commands.add_parser(
+        "account", help="show how ManimFlow is signed in to Codex, the ChatGPT plan and the models it offers"
+    )
+    account.add_argument("--json", action="store_true", help="print a JSON report")
+
     args = parser.parse_args(argv)
     # The agent and the UI read this output through pipes; lesson paths are
     # often accented ("Aula 09 - Óptica"), so don't depend on the code page.
@@ -114,6 +119,8 @@ def main(argv: list[str] | None = None) -> int:
         return _plan_validate(args.lesson, args.json)
     if args.command == "doctor":
         return _doctor(args.install, args.json)
+    if args.command == "account":
+        return _account(args.json)
     if args.command == "export":
         return _export(
             args.lesson, args.preset, args.resolution, args.fps, args.aspect_ratio, args.background, args.json
@@ -281,6 +288,23 @@ def _doctor(install: bool, as_json: bool) -> int:
     lines += [f"{'ok' if check.ok else 'falta':<6}{check.message}" for check in report.checks]
     details = [report.install_output] if report.install_output else []
     return _finish(report, as_json, lines, details)
+
+
+def _account(as_json: bool) -> int:
+    import asyncio
+
+    from manimflow.account_report import AccountReport, read_account
+    from manimflow.codex_agent import CodexAgent, default_codex_home
+
+    async def read() -> AccountReport:
+        agent = CodexAgent(default_codex_home(), sessions=False)
+        try:
+            return await read_account(agent)
+        finally:
+            await agent.close()
+
+    report = asyncio.run(read())
+    return _finish(report, as_json, report.lines(), [])
 
 
 def _finish(report: _Report, as_json: bool, lines: list[str], details: list[str]) -> int:

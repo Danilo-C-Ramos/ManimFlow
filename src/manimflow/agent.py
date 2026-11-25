@@ -73,6 +73,8 @@ class Account:
     logged_in: bool
     method: Literal["chatgpt", "api_key"] | None = None
     email: str | None = None
+    # The ChatGPT plan, as Codex names it: "free", "go", "plus", "pro" and so on.
+    plan: str | None = None
 
 
 @dataclass(frozen=True)
@@ -103,6 +105,8 @@ class ModelOption:
     name: str
     efforts: tuple[str, ...]
     default_effort: str
+    # The model the account's catalog starts on when nothing else is asked for.
+    default: bool = False
 
 
 @dataclass(frozen=True)
@@ -186,9 +190,21 @@ class Agent(Protocol):
         """The models the account may pick, in the engine's order."""
         ...
 
-    async def model_settings(self) -> ModelSettings: ...
+    async def presets(self) -> dict[str, ModelSettings]:
+        """The "Rápido / Caprichado" switch, on the model chosen for the account's plan."""
+        ...
 
-    async def set_model_settings(self, settings: ModelSettings) -> None: ...
+    async def model_settings(self) -> ModelSettings:
+        """What the next turn uses: the pick in "Avançado", else the switch's position on the account's model."""
+        ...
+
+    async def set_model_settings(self, settings: ModelSettings) -> None:
+        """A pick in "Avançado"; signing in or out drops it, since another plan may lack the model."""
+        ...
+
+    async def use_preset(self, name: str) -> None:
+        """Moves the switch to `name`, which each turn reads on the account it runs with."""
+        ...
 
     async def close(self) -> None:
         """Stops the engine when the app shuts down."""
