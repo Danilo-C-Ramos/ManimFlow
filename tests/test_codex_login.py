@@ -5,7 +5,7 @@ import urllib.request
 
 import pytest
 
-from manimflow.agent import Account, LoginFailed
+from manimflow.agent import Account, LoginFailed, ModelOption, ModelSettings
 from manimflow.codex_agent import CodexAgent
 
 
@@ -89,3 +89,53 @@ async def test_an_api_key_has_no_plan_quota(tmp_path):
         assert await agent.quota() is None
     finally:
         await agent.close()
+
+
+async def test_signing_out_forgets_the_model_picked_for_the_old_account(tmp_path):
+    agent = CodexAgent(tmp_path / "codex")
+    try:
+        await agent.login(api_key="sk-teste")
+        rapido = await agent.model_settings()
+        await agent.set_model_settings(ModelSettings("gpt-6.1-sol", "xhigh"))
+        await agent.logout()
+        # The next account may be on a plan that lacks the model picked in "Avançado".
+        await agent.login(api_key="sk-outra")
+        assert await agent.model_settings() == rapido == (await agent.presets())["Rápido"]
+    finally:
+        await agent.close()
+
+
+async def test_signing_in_drops_the_avancado_pick_and_keeps_the_switch(tmp_path):
+    agent = CodexAgent(tmp_path / "codex")
+    try:
+        await agent.use_preset("Caprichado")
+        await agent.set_model_settings(ModelSettings("gpt-6.1-sol", "xhigh"))
+        await agent.login(api_key="sk-teste")
+        # On the new account's model.
+        assert await agent.model_settings() == (await agent.presets())["Caprichado"]
+    finally:
+        await agent.close()
+
+
+async def test_a_turn_that_starts_while_a_sign_in_ends_reads_the_new_account(tmp_path):
+    agent = CodexAgent(tmp_path / "codex")
+    accounts = [Account(logged_in=True, method="api_key"), Account(logged_in=True, method="chatgpt", plan="free")]
+    catalog = [
+        ModelOption("gpt-6.2-sol", "GPT-6.2-Sol", ("low", "high"), "low", default=True),
+        ModelOption("gpt-6-luna", "GPT-6-Luna", ("low", "high"), "medium"),
+    ]
+
+    async def account():
+        return accounts[0]
+
+    async def models():
+        # Another tab's ChatGPT Free sign-in ends while the catalog is read.
+        if len(accounts) > 1:
+            accounts.pop(0)
+            agent._forget_model_choice()
+        return catalog
+
+    agent.account = account  # type: ignore[method-assign]
+    agent.models = models  # type: ignore[method-assign]
+
+    assert await agent.model_settings() == ModelSettings("gpt-6-luna", "low")

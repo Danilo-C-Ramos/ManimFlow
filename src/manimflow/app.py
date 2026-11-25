@@ -304,7 +304,7 @@ class SignIn:
         self.on_signed_in = on_signed_in
         with ui.card().classes("mx-auto mt-16 w-full max-w-md items-stretch gap-4"):
             ui.label("Entre para conversar com o agente").classes("text-lg")
-            ui.label("Use a sua conta do ChatGPT Plus ou Pro, ou uma chave de API da OpenAI.").classes(
+            ui.label("Use a sua conta do ChatGPT, de qualquer plano, ou uma chave de API da OpenAI.").classes(
                 "text-grey-7"
             )
             self.chatgpt = ui.button("Entrar com o ChatGPT", on_click=self.with_chatgpt)

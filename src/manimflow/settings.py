@@ -8,7 +8,7 @@ from datetime import datetime
 from nicegui import events, ui
 
 from manimflow.agent import Account, Agent, ModelOption, ModelSettings, QuotaWindow
-from manimflow.model_presets import PRESETS, preset_name
+from manimflow.model_presets import CAREFUL, QUICK, preset_name
 
 logger = logging.getLogger(__name__)
 
@@ -25,25 +25,29 @@ EFFORTS = {
 
 
 class ModelSwitch:
-    """Switches the agent between the two presets; from the next turn on."""
+    """Switches the agent between the two presets, on the account's model; from the next turn on.
 
-    def __init__(self, agent: Agent, current: ModelSettings) -> None:
+    `position` is the preset the agent runs on, or None for a pick in "Avançado".
+    """
+
+    def __init__(self, agent: Agent, position: str | None) -> None:
         self.agent = agent
-        self.toggle = ui.toggle(list(PRESETS), value=preset_name(current), on_change=self._changed)
+        self.toggle = ui.toggle([QUICK, CAREFUL], value=position, on_change=self._changed)
         self.toggle.props("dense no-caps").mark("preset")
 
-    def show(self, settings: ModelSettings) -> None:
-        """Moves the switch to `settings`, or to neither preset when they match none."""
-        self.toggle.set_value(preset_name(settings))
+    def show(self, presets: dict[str, ModelSettings], settings: ModelSettings) -> None:
+        """Moves the switch to `settings` among `presets`, or to neither when they match none."""
+        self.toggle.set_value(preset_name(presets, settings))
 
     async def _changed(self, event: events.ValueChangeEventArguments) -> None:
-        # None when the teacher picked a model in "Avançado".
+        # None when the teacher picked a model in "Avançado". The agent reads the
+        # position on the account's model when the turn starts, so nothing waits here.
         if event.value is not None:
-            await self.agent.set_model_settings(PRESETS[event.value])
+            await self.agent.use_preset(event.value)
 
 
 async def model_switch(agent: Agent) -> ModelSwitch:
-    return ModelSwitch(agent, await agent.model_settings())
+    return ModelSwitch(agent, preset_name(await agent.presets(), await agent.model_settings()))
 
 
 class SettingsDialog:
@@ -66,12 +70,15 @@ class SettingsDialog:
         account = await self.agent.account()
         settings = await self.agent.model_settings()
         models = await self.agent.models()
+        presets = await self.agent.presets()
         quota = await self.agent.quota()
         self.dialog.clear()
         with self.dialog, ui.card().classes("w-full max-w-lg items-stretch gap-4"):
             ui.label("Configurações").classes("text-lg")
             with ui.row().classes("items-center no-wrap"):
-                ui.label(_signed_in_as(account)).classes("grow")
+                with ui.column().classes("grow gap-0"):
+                    ui.label(_signed_in_as(account))
+                    ui.label(_presets_use(presets, models)).classes("text-caption text-grey-7")
                 ui.button("Sair", on_click=self._sign_out).props("outline")
             if quota:
                 with ui.column().classes("w-full gap-2").mark("quota"):
@@ -79,7 +86,7 @@ class SettingsDialog:
                     for window in quota:
                         _quota_row(window)
             with ui.expansion("Avançado", icon="tune").classes("text-grey-8"):
-                AdvancedSettings(self.agent, models, settings, self.switch)
+                AdvancedSettings(self.agent, models, presets, settings, self.switch)
             ui.button("Fechar", on_click=self.dialog.close).props("flat").classes("self-end")
         self.dialog.open()
 
@@ -94,25 +101,55 @@ class SettingsDialog:
         self.on_signed_out()
 
 
+# The ChatGPT plans as OpenAI names them to teachers; any other shows as Codex names it.
+PLANS = {
+    "free": "Free",
+    "go": "Go",
+    "plus": "Plus",
+    "pro": "Pro",
+    "prolite": "Pro Lite",
+    "promax": "Pro Max",
+    "team": "Business",
+    "business": "Business",
+    "enterprise": "Enterprise",
+    "edu": "Edu",
+}
+
+
 def _signed_in_as(account: Account) -> str:
     match account.method:
-        case "chatgpt" if account.email:
-            return f"Conectado com o ChatGPT: {account.email}"
         case "chatgpt":
-            return "Conectado com o ChatGPT"
+            chatgpt = "Conectado com o ChatGPT"
+            if account.plan and account.plan != "unknown":
+                chatgpt += f" (plano {PLANS.get(account.plan, account.plan.replace('_', ' ').title())})"
+            return f"{chatgpt}: {account.email}" if account.email else chatgpt
         case "api_key":
             return "Conectado com uma chave de API da OpenAI"
     # A provider configured without OpenAI auth, such as a local model.
     return "Conectado"
 
 
+def _presets_use(presets: dict[str, ModelSettings], models: list[ModelOption]) -> str:
+    """Which model the switch runs on, by the name the catalog gives it."""
+    model = presets[QUICK].model
+    name = next((option.name for option in models if option.model == model), model)
+    return f"Rápido e Caprichado usam o {name}."
+
+
 class AdvancedSettings:
     """Picks the model and the reasoning effort by hand, among those the account offers."""
 
     def __init__(
-        self, agent: Agent, models: list[ModelOption], current: ModelSettings, switch: ModelSwitch | None
+        self,
+        agent: Agent,
+        models: list[ModelOption],
+        presets: dict[str, ModelSettings],
+        current: ModelSettings,
+        switch: ModelSwitch | None,
     ) -> None:
         self.agent = agent
+        # The account's presets as the dialog opened, which the switch matches a pick against.
+        self.presets = presets
         self.switch = switch
         self.models = {option.model: option for option in models}
         # Keeps the current model pickable when the account's list lacks it.
@@ -147,7 +184,7 @@ class AdvancedSettings:
         settings = ModelSettings(self.model.value, self.effort.value)
         await self.agent.set_model_settings(settings)
         if self.switch is not None:
-            self.switch.show(settings)
+            self.switch.show(self.presets, settings)
 
 
 def _quota_row(window: QuotaWindow) -> None:

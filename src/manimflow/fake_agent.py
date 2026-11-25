@@ -8,7 +8,7 @@ engine would.
 
 import asyncio
 from collections.abc import AsyncIterator, Callable, Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -30,7 +30,7 @@ from manimflow.agent import (
     teachers_words,
     with_attachments,
 )
-from manimflow.model_presets import DEFAULT, MODEL
+from manimflow.model_presets import QUICK, choose_model, presets
 
 
 @dataclass(frozen=True)
@@ -64,9 +64,9 @@ class Received:
 Step = Event | EditFile | Produce | Exception
 Scenario = list[list[Step]]
 
-ACCOUNT = Account(logged_in=True, method="chatgpt", email="professora@example.com")
+ACCOUNT = Account(logged_in=True, method="chatgpt", email="professora@example.com", plan="plus")
 MODELS = [
-    ModelOption(MODEL, "GPT-6.1-Sol", ("low", "medium", "high", "xhigh"), "low"),
+    ModelOption("gpt-6.2-sol", "GPT-6.2-Sol", ("low", "medium", "high", "xhigh"), "low", default=True),
     ModelOption("gpt-6-luna", "GPT-6-Luna", ("low", "medium", "high"), "medium"),
 ]
 
@@ -83,14 +83,19 @@ class ScriptedAgent:
         logged_in: bool = True,
         login_failure: str | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        plan: str = "plus",
     ) -> None:
         self.scenario = scenario
         # Seconds between steps, so the demo streams at a visible pace.
         self.delay = delay
-        self._account = ACCOUNT if logged_in else Account(logged_in=False)
+        # The ChatGPT plan a ChatGPT login signs in with.
+        self._chatgpt = replace(ACCOUNT, plan=plan)
+        self._account = self._chatgpt if logged_in else Account(logged_in=False)
         # When set, every login attempt fails with this message.
         self._login_failure = login_failure
-        self._settings = DEFAULT
+        # The switch's position and a pick in "Avançado", kept as Codex keeps them.
+        self._preset = QUICK
+        self._settings: ModelSettings | None = None
         # The model settings each turn ran with, in order, across sessions.
         self.turn_settings: list[ModelSettings] = []
         # When each session started; the fake keeps its sessions in memory only.
@@ -114,7 +119,13 @@ class ScriptedAgent:
         return session
 
     def _start_turn(self) -> None:
-        self.turn_settings.append(self._settings)
+        self.turn_settings.append(self._current())
+
+    def _presets(self) -> dict[str, ModelSettings]:
+        return presets(choose_model(self._account.plan, MODELS))
+
+    def _current(self) -> ModelSettings:
+        return self._settings or self._presets()[self._preset]
 
     async def past_sessions(self, lesson: Path) -> list[PastSession]:
         return [
@@ -136,11 +147,13 @@ class ScriptedAgent:
     async def login(self, api_key: str | None = None) -> Account:
         if self._login_failure is not None:
             raise LoginFailed(self._login_failure)
-        self._account = ACCOUNT if api_key is None else Account(logged_in=True, method="api_key")
+        self._account = self._chatgpt if api_key is None else Account(logged_in=True, method="api_key")
+        self._settings = None
         return self._account
 
     async def logout(self) -> None:
         self._account = Account(logged_in=False)
+        self._settings = None
 
     async def quota(self) -> list[QuotaWindow] | None:
         return QUOTA if self._account.method == "chatgpt" else None
@@ -148,11 +161,18 @@ class ScriptedAgent:
     async def models(self) -> list[ModelOption]:
         return MODELS
 
+    async def presets(self) -> dict[str, ModelSettings]:
+        return self._presets()
+
     async def model_settings(self) -> ModelSettings:
-        return self._settings
+        return self._current()
 
     async def set_model_settings(self, settings: ModelSettings) -> None:
         self._settings = settings
+
+    async def use_preset(self, name: str) -> None:
+        self._preset = name
+        self._settings = None
 
     async def close(self) -> None:
         pass

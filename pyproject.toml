@@ -14,7 +14,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "manim>=0.22,<0.23",
     "nicegui>=3,<4",
-    "openai-codex>=0.162,<0.163",
+    "openai-codex>=0.172,<0.173",
     "pygit2>=1.18,<2",
     # The agent runs each lesson's test_fisica.py with it.
     "pytest>=8,<10",

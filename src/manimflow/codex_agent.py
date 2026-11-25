@@ -86,7 +86,7 @@ from manimflow.agent import (
     teachers_words,
     with_attachments,
 )
-from manimflow.model_presets import DEFAULT
+from manimflow.model_presets import QUICK, choose_model, presets
 
 logger = logging.getLogger(__name__)
 
@@ -122,24 +122,34 @@ class CodexAgent:
         home: Path,
         open_browser: Callable[[str], object] = webbrowser.open,
         sandbox_problem: Callable[[str], str | None] = linux_sandbox.problem,
+        sessions: bool = True,
     ) -> None:
         """`home` is the Codex home that holds ManimFlow's login, config and threads.
 
         `sandbox_problem` says, given the agent's PATH, why the Linux sandbox can't start.
+        Without `sessions`, the agent only reads the account and its models, and never
+        readies the sandbox, which on Windows may ask for administrator.
         """
         self.home = home.absolute()
         self._open_browser = open_browser
         self._check_sandbox = sandbox_problem
+        self._sessions = sessions
         self._codex: AsyncCodex | None = None
         # Readies the sandbox in the background, so the first page doesn't wait for it.
         self._sandbox: asyncio.Task[str | None] | None = None
-        self._settings = DEFAULT
+        # The switch's position, read on the account's model at each turn.
+        self._preset = QUICK
+        # A pick in "Avançado", which takes over from the switch until the next sign-in.
+        self._settings: ModelSettings | None = None
+        # Counts sign-ins and sign-outs, so a read that spans one is read again.
+        self._account_changes = 0
 
     async def _client(self) -> AsyncCodex:
         if self._codex is None:
             # The app-server refuses to start when its home is missing.
             self.home.mkdir(parents=True, exist_ok=True)
-            self._install_skill()
+            if self._sessions:
+                self._install_skill()
             # `uvx manimflow` doesn't put its environment on PATH, and the agent
             # renders through the `manimflow` script that lives there.
             scripts = sysconfig.get_path("scripts")
@@ -148,7 +158,8 @@ class CodexAgent:
             codex = AsyncCodex(CodexConfig(env=env))
             await codex._ensure_initialized()
             self._codex = codex
-            self._sandbox = asyncio.create_task(self._prepare_sandbox(codex, path))
+            if self._sessions:
+                self._sandbox = asyncio.create_task(self._prepare_sandbox(codex, path))
         return self._codex
 
     @property
@@ -175,7 +186,7 @@ class CodexAgent:
         Waits until the sandbox is ready, which on Windows can take minutes the first time.
         """
         await self._client()
-        assert self._sandbox is not None
+        assert self._sandbox is not None, "an agent started without sessions has no sandbox"
         return await self._sandbox
 
     async def start_session(self, lesson: Path) -> "CodexSession":
@@ -200,9 +211,19 @@ class CodexAgent:
                 model.display_name,
                 tuple(option.reasoning_effort.value for option in model.supported_reasoning_efforts),
                 model.default_reasoning_effort.value,
+                model.is_default,
             )
             for model in (await codex.models()).data
         ]
+
+    async def presets(self) -> dict[str, ModelSettings]:
+        """On the model `choose_model` picks from the account's plan and from the
+        catalog the app-server fetches with the account's sign-in.
+
+        Read fresh each time, since another tab may sign in with another plan.
+        """
+        account = await self.account()
+        return presets(choose_model(account.plan, await self.models()))
 
     async def past_sessions(self, lesson: Path) -> list[PastSession]:
         """The lesson's threads, found by the folder they started in, newest first."""
@@ -241,11 +262,24 @@ class CodexAgent:
         return messages
 
     async def model_settings(self) -> ModelSettings:
-        return self._settings
+        while True:
+            changes = self._account_changes
+            settings = self._settings or (await self.presets())[self._preset]
+            if changes == self._account_changes:
+                return settings
 
     async def set_model_settings(self, settings: ModelSettings) -> None:
         """Applies from the next turn on, in every session."""
         self._settings = settings
+
+    async def use_preset(self, name: str) -> None:
+        self._preset = name
+        self._settings = None
+
+    def _forget_model_choice(self) -> None:
+        """For another account, whose plan may not include the model picked before."""
+        self._settings = None
+        self._account_changes += 1
 
     async def account(self) -> Account:
         codex = await self._client()
@@ -253,8 +287,8 @@ class CodexAgent:
         match state.account.root if state.account else None:
             case ApiKeyAccount():
                 return Account(logged_in=True, method="api_key")
-            case ChatgptAccount(email=email):
-                return Account(logged_in=True, method="chatgpt", email=email)
+            case ChatgptAccount(email=email, plan_type=plan):
+                return Account(logged_in=True, method="chatgpt", email=email, plan=plan.value)
         # A provider configured without OpenAI auth, such as a local model, needs no login.
         return Account(logged_in=state.account is not None or not state.requires_openai_auth)
 
@@ -268,7 +302,7 @@ class CodexAgent:
             except CodexError as error:
                 logger.warning("Codex refused the API key: %s", error)
                 raise LoginFailed("O Codex não aceitou essa chave de API. Confira se ela está completa.") from error
-            return await self.account()
+            return await self._signed_in()
 
         # Codex listens on a 127.0.0.1 loopback port for the browser's redirect.
         attempt = await codex.login_chatgpt()
@@ -277,11 +311,17 @@ class CodexAgent:
         if not outcome.success:
             logger.warning("ChatGPT login failed: %s", outcome.error)
             raise LoginFailed("O login com o ChatGPT não foi concluído. Tente de novo.")
+        return await self._signed_in()
+
+    async def _signed_in(self) -> Account:
+        # Once the login ends: a choice made while it waited belongs to the account before.
+        self._forget_model_choice()
         return await self.account()
 
     async def logout(self) -> None:
         codex = await self._client()
         await codex.logout()
+        self._forget_model_choice()
 
     async def quota(self) -> list[QuotaWindow] | None:
         if (await self.account()).method != "chatgpt":
@@ -457,6 +497,10 @@ _EXPLANATIONS = {
     ),
     CodexErrorInfoValue.internal_server_error: _SERVICE_UNSTABLE,
     CodexErrorInfoValue.server_overloaded: _SERVICE_UNSTABLE,
+    # Such as a model picked in "Avançado" that the plan doesn't include.
+    CodexErrorInfoValue.model_not_found: (
+        'O seu plano não inclui esse modelo. Escolha outro em Configurações, na parte "Avançado".'
+    ),
 }
 
 

@@ -30,7 +30,7 @@ from manimflow.agent import (
     ModelSettings,
 )
 from manimflow.codex_agent import BASE_INSTRUCTIONS, SKILL, CodexAgent, _set_up_windows_sandbox
-from manimflow.model_presets import CAREFUL, QUICK
+from manimflow.model_presets import CAREFUL, EFFORTS, LIMITED_MODELS, MODELS, QUICK
 from mock_model import command, message, patch, view_image
 
 
@@ -337,6 +337,17 @@ async def test_the_agent_has_no_network(codex_agent, mock_model, lesson, target)
             {"message": "bad request", "type": "invalid_request_error"},
             "O agente parou por um erro inesperado.",
         ),
+        (
+            # What a ChatGPT Free account got when asked for GPT-6.1-Sol.
+            400,
+            {
+                "type": "invalid_request_error",
+                "message": "The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account.",
+                "code": "model_not_found",
+                "subreason": "model_not_in_accessible_catalog",
+            },
+            'O seu plano não inclui esse modelo. Escolha outro em Configurações, na parte "Avançado".',
+        ),
     ],
 )
 async def test_a_failed_turn_is_explained_in_portuguese(codex_agent, mock_model, lesson, status, error, explanation):
@@ -377,14 +388,17 @@ async def test_turns_use_the_model_settings(codex_agent, mock_model, lesson):
 async def test_turns_start_on_the_rapido_preset(codex_agent, mock_model, lesson):
     await turn(await codex_agent.start_session(lesson))
 
-    assert model_used(mock_model.requests[-1]) == QUICK
+    # Without a ChatGPT plan, as with an API key, the switch takes the newest Sol.
+    assert model_used(mock_model.requests[-1]) == ModelSettings(MODELS[0], EFFORTS[QUICK])
+    assert (await codex_agent.presets())[CAREFUL] == ModelSettings(MODELS[0], EFFORTS[CAREFUL])
 
 
-async def test_the_model_list_offers_the_presets(codex_agent):
+async def test_the_catalog_offers_each_plans_model_at_both_efforts(codex_agent):
+    """When OpenAI retires one of these models, update model_presets.py and docs/models.md."""
     models = {option.model: option for option in await codex_agent.models()}
 
-    assert QUICK.effort in models[QUICK.model].efforts
-    assert CAREFUL.effort in models[CAREFUL.model].efforts
+    for model in (MODELS[0], LIMITED_MODELS[0]):
+        assert set(EFFORTS.values()) <= set(models[model].efforts)
     assert all(option.default_effort in option.efforts for option in models.values())
 
 

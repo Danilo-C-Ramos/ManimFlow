@@ -116,7 +116,7 @@ class StartComposer:
             try:
                 await model_switch(agent)
             except Exception:
-                # Signed out: the lesson asks to sign in first, and the switch shows there.
+                # Codex didn't answer: the lesson page draws its own switch.
                 logger.debug("Reading the model settings failed", exc_info=True)
 
     def start(self) -> None:
