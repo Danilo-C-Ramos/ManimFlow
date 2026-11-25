@@ -15,6 +15,7 @@ from manimflow.agent import AssistantText
 from manimflow.fake_agent import EditFile, ScriptedAgent
 from manimflow.home import app_root, lesson_url
 from manimflow.lessons import Library, Status, status
+from manimflow.versioning import History
 from conftest import EXAMPLE, FIXTURES
 
 
@@ -456,6 +457,7 @@ async def test_restaurar_exemplo_brings_the_original_back_and_starts_its_convers
         await user.should_see("Mudei.", retries=100)
         await user.should_not_see(marker="progress", retries=100)
 
+        (library.example() / "rascunho.md").write_text("meu rascunho\n", encoding="utf-8")
         user.find(marker="reset-example").click()
         user.find(marker="confirm-reset-example").click()
 
@@ -464,9 +466,12 @@ async def test_restaurar_exemplo_brings_the_original_back_and_starts_its_convers
     example = library.example()
     assert agent.archived == [example]
     assert (example / "cenas.py").read_text(encoding="utf-8") == (EXAMPLE / "cenas.py").read_text(encoding="utf-8")
-    # A new version, so the teacher's changes stay in the example's history.
+    assert not (example / "rascunho.md").exists()
+    # A new version, so the teacher's changes stay in the example's history...
     assert history(example)[:2] == ["Exemplo restaurado", "Pedido: muda tudo"]
     assert status(example) == Status.READY
+    # ...but not as edits of the teacher's for the agent's next message.
+    assert History.open(example).manual_changes() == ""
 
 
 async def test_signed_out_the_sidebar_and_the_settings_offer_to_sign_in(library):

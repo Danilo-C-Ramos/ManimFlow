@@ -118,6 +118,11 @@ class History:
             if patch is not None and PLAN_FILE not in (patch.delta.old_file.path, patch.delta.new_file.path)
         )
 
+    def start_over(self) -> None:
+        """Starts the teacher's changes over from the lesson as it is now, as when its files
+        were brought back to an original: none of that is the teacher's to tell the agent."""
+        self._mark_agent_turn()
+
     def approve_plan(self) -> None:
         """Records plano.yaml as it is now as the plan the teacher approved."""
         workdir = Path(self._repo.workdir)

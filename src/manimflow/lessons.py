@@ -307,17 +307,18 @@ class Library:
         """
         example = self.example()
         bundled = _EXAMPLES / "relatividade"
-        for path in example.iterdir():
-            if path.name == ".git":
-                continue
-            if path.is_dir():
-                shutil.rmtree(path)
-            else:
-                path.unlink()
+        # Copied over first: Windows lets a file that is being read, such as a preview
+        # video playing, be overwritten but not deleted.
         shutil.copytree(bundled, example, dirs_exist_ok=True)
         shutil.copy(_DEFAULT_PROFILE, example.parent / PROFILE_FILE)
+        for path in _not_in(bundled, example):
+            if path.is_dir():
+                path.rmdir()
+            else:
+                path.unlink()
         history = History.open(example)
         history.commit_manual_edit(EXAMPLE_RESTORED)
+        history.start_over()
         # Its plan was agreed long ago, as in a fresh copy.
         history.approve_plan()
         return example
@@ -344,6 +345,21 @@ class Library:
     def _save_config(self, config: dict) -> None:
         self.data.mkdir(parents=True, exist_ok=True)
         (self.data / _CONFIG).write_text(json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _not_in(source: Path, target: Path) -> list[Path]:
+    """What `target` holds that `source` doesn't, its history aside; inner paths first."""
+    found: list[Path] = []
+    for folder, dirs, names in os.walk(target):
+        here = Path(folder)
+        if here == target:
+            dirs[:] = [name for name in dirs if name != ".git"]
+        for name in dirs + names:
+            path = here / name
+            if not (source / path.relative_to(target)).exists():
+                found.append(path)
+    # An extra folder's contents are listed after it; deleting from the end empties it first.
+    return found[::-1]
 
 
 def _add_missing(source: Path, target: Path) -> None:
