@@ -43,7 +43,7 @@ To update, run `pixi update` in the folder.
 
 ## Linux: the agent's sandbox
 
-Codex runs every agent command inside bubblewrap. On Ubuntu 23.10 and later, user namespaces are restricted, and bubblewrap can't start until it has ManimFlow's AppArmor profile. `pixi run manimflow doctor` reports this and prints the one command, run with `sudo`, that installs bubblewrap and the profile. The chat shows the same message instead of starting a turn. See [ADR 0002](adr/0002-linux-sandbox-on-ubuntu-uses-an-apparmor-profile.md).
+Codex runs every agent command inside bubblewrap. On Ubuntu 23.10 and later, user namespaces are restricted, and bubblewrap needs an AppArmor profile. Ubuntu 26.04 ships one. On earlier releases, such as 24.04, bubblewrap can't start until it has ManimFlow's. `pixi run manimflow doctor` reports this and prints the one command, run with `sudo`, that installs bubblewrap and the profile. The chat shows the same message instead of starting a turn. See [ADR 0002](adr/0002-linux-sandbox-on-ubuntu-uses-an-apparmor-profile.md).
 
 ## Without pixi
 

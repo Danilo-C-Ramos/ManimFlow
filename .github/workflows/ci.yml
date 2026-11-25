@@ -28,13 +28,19 @@ jobs:
         run: uv sync --locked
 
       # Ubuntu 24.04 restricts user namespaces, so Codex's sandbox can't start until bubblewrap
-      # gets ManimFlow's AppArmor profile. This runs the command that the doctor check and the
-      # chat give teachers; bubblewrap is installed first only so apt doesn't stop to ask.
+      # gets ManimFlow's AppArmor profile. Ubuntu 26.04 ships its own profile for bubblewrap,
+      # and adding ManimFlow's there breaks the sandbox's network namespace. So, as the doctor
+      # check and the chat tell teachers, the command runs only when the sandbox doesn't start.
+      # bubblewrap is installed first only so apt doesn't stop to ask.
       - name: Let the agent sandbox start
         if: runner.os == 'Linux'
         run: |
           sudo apt-get install -y bubblewrap
-          eval "$(uv run python -c 'from manimflow.linux_sandbox import fix_command; print(fix_command())')"
+          problem="$(uv run python -c 'import os; from manimflow.linux_sandbox import problem; print(problem(os.environ["PATH"]) or "")')"
+          if [ -n "$problem" ]; then
+            echo "$problem"
+            eval "$(uv run python -c 'from manimflow.linux_sandbox import fix_command; print(fix_command())')"
+          fi
 
       # The bundled example writes Tex and MathTex, so CI needs LaTeX: the TinyTeX that
       # `doctor` installs for teachers, in the runner's user folder. It ends with check mode

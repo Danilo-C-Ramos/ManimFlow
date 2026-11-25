@@ -20,7 +20,7 @@ Each check is `ok` or `falta`, with a sentence for the teacher.
 
 The checks look where renders look: ManimFlow's TinyTeX first, then the PATH. A system LaTeX such as MiKTeX passes when it has every package. The package list is the one in Manim's installation docs, minus `ms`, which TeX Live retired.
 
-On Ubuntu 23.10 and later, `sandbox` fails until bubblewrap has ManimFlow's AppArmor profile, and its message gives the one-line command that installs both, as administrator. `--install` doesn't run it, because it needs `sudo`. The chat shows the same message instead of starting a turn. See `docs/adr/0002-linux-sandbox-on-ubuntu-uses-an-apparmor-profile.md`.
+On Ubuntu 23.10 and later, bubblewrap needs an AppArmor profile. Ubuntu 26.04 ships one, so `sandbox` passes there. On earlier releases, such as 24.04, `sandbox` fails until bubblewrap has ManimFlow's profile, and its message gives the one-line command that installs both, as administrator. Where both profiles are installed, ManimFlow's breaks Ubuntu's, and the message gives the command that removes ManimFlow's. `--install` doesn't run it, because it needs `sudo`. The chat shows the same message instead of starting a turn. See `docs/adr/0002-linux-sandbox-on-ubuntu-uses-an-apparmor-profile.md`.
 
 The command exits non-zero when any check fails or the install fails.
 
