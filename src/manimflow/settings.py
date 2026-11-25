@@ -9,6 +9,7 @@ from nicegui import events, ui
 
 from manimflow.agent import Account, Agent, ModelOption, ModelSettings, QuotaWindow
 from manimflow.model_presets import CAREFUL, QUICK, preset_name
+from manimflow.sign_in import SignIn
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,9 @@ class SettingsDialog:
 
     async def open(self) -> None:
         account = await self.agent.account()
+        if not account.logged_in:
+            self._show_signed_out()
+            return
         settings = await self.agent.model_settings()
         models = await self.agent.models()
         presets = await self.agent.presets()
@@ -89,6 +93,21 @@ class SettingsDialog:
                 AdvancedSettings(self.agent, models, presets, settings, self.switch)
             ui.button("Fechar", on_click=self.dialog.close).props("flat").classes("self-end")
         self.dialog.open()
+
+    def _show_signed_out(self) -> None:
+        """Nobody is signed in: the settings offer both ways to sign in instead."""
+        self.dialog.clear()
+        with self.dialog, ui.card().classes("w-full max-w-lg items-stretch gap-4"):
+            ui.label("Configurações").classes("text-lg")
+            ui.label("Você não está conectado.").classes("text-grey-8").mark("signed-out")
+            SignIn(self.agent, on_signed_in=self._signed_in, card=False)
+            ui.button("Fechar", on_click=self.dialog.close).props("flat").classes("self-end")
+        self.dialog.open()
+
+    async def _signed_in(self) -> None:
+        # The page shows the new account's switch, usage and chat.
+        self.dialog.close()
+        ui.navigate.reload()
 
     async def _sign_out(self) -> None:
         try:

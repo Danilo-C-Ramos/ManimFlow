@@ -6,7 +6,7 @@ the UI. Messages and errors that reach the teacher are in Portuguese.
 """
 
 from collections.abc import AsyncIterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Literal, Protocol
@@ -21,10 +21,15 @@ class AssistantText:
 
 @dataclass(frozen=True)
 class CommandStarted:
-    """The agent started a shell command; `id` pairs it with its CommandFinished."""
+    """The agent started a shell command; `id` pairs it with its CommandFinished.
+
+    `reads` holds the files the command only reads, relative to the lesson when inside
+    it, so the teacher sees "Lendo o plano" instead of a shell command.
+    """
 
     id: str
     command: str
+    reads: tuple[str, ...] = field(default=(), compare=False)
 
 
 @dataclass(frozen=True)
@@ -65,7 +70,29 @@ class AgentError:
     delivered: bool = True
 
 
-Event = AssistantText | CommandStarted | CommandFinished | FileChanged | ImageViewed | AgentError
+@dataclass(frozen=True)
+class Working:
+    """What the agent does between the other events, such as "Pensando", for the progress
+    bar only: it never shows in the conversation."""
+
+    label: str
+
+
+@dataclass(frozen=True)
+class ChecklistStep:
+    text: str
+    status: Literal["pending", "inProgress", "completed"]
+
+
+@dataclass(frozen=True)
+class Checklist:
+    """The agent's own list of steps for the request, as it updates it; the progress bar
+    shows where it is."""
+
+    steps: tuple[ChecklistStep, ...]
+
+
+Event = AssistantText | CommandStarted | CommandFinished | FileChanged | ImageViewed | AgentError | Working | Checklist
 
 
 @dataclass(frozen=True)
@@ -109,14 +136,6 @@ class ModelOption:
     default: bool = False
 
 
-@dataclass(frozen=True)
-class Message:
-    """One message of a conversation, by the teacher or by the agent."""
-
-    author: Literal["teacher", "agent"]
-    text: str
-
-
 # Between the teacher's words and each attachment, in the one text an engine gets.
 _ATTACHMENT = "\n\n----- Anexo {name} -----\n\n"
 
@@ -137,36 +156,60 @@ def teachers_words(message: str) -> str:
 
 
 @dataclass(frozen=True)
-class PastSession:
-    """A lesson's earlier conversation, as the session list shows it; `started_at` is aware."""
+class PastTurn:
+    """One turn of a lesson's conversation, as the chat shows it again.
+
+    `session` is the thread it ran in: a lesson whose conversation outgrew the model's
+    context, or that was used before conversations continued, has more than one.
+    """
 
     id: str
-    started_at: datetime
-    first_request: str
+    session: str
+    # Aware; None when the engine didn't record it.
+    started_at: datetime | None
+    # The teacher's words, without the attachments.
+    request: str
+    events: list[Event]
+    seconds: float | None = None
 
 
 class Session(Protocol):
-    """One conversation thread about one lesson."""
+    """A lesson's conversation, which every message continues."""
 
-    id: str
     lesson: Path
 
-    def send(self, text: str, attachments: Sequence[Path] = ()) -> AsyncIterator[Event]:
-        """Sends the teacher's message and streams the turn's events until it ends."""
+    @property
+    def last_turn(self) -> str | None:
+        """The id of the turn the last `send` started, which the turn's version records;
+        None when it started none."""
+        ...
+
+    def send(
+        self, text: str, attachments: Sequence[Path] = (), output_schema: dict | None = None
+    ) -> AsyncIterator[Event]:
+        """Sends the teacher's message and streams the turn's events until it ends.
+
+        With `output_schema`, the agent's last text is JSON that follows it.
+        """
+        ...
+
+    async def stop(self) -> None:
+        """Interrupts the turn that is running, if any; it ends with an AgentError."""
         ...
 
 
 class Agent(Protocol):
-    async def start_session(self, lesson: Path) -> Session:
-        """Starts a new conversation about the lesson; it never resumes an old one."""
+    async def session(self, lesson: Path) -> Session:
+        """The lesson's conversation: its newest thread in which the teacher wrote, which
+        the next message continues, or a new one started by the first message."""
         ...
 
-    async def past_sessions(self, lesson: Path) -> list[PastSession]:
-        """The lesson's sessions in which the teacher sent something, newest first."""
+    async def lesson_history(self, lesson: Path) -> list[PastTurn]:
+        """Every turn of the lesson's conversations, oldest first."""
         ...
 
-    async def session_messages(self, session_id: str) -> list[Message]:
-        """The messages of a past session, in order."""
+    async def archive(self, lesson: Path) -> None:
+        """Puts the lesson's conversations away, so its next message starts a new one."""
         ...
 
     async def account(self) -> Account: ...

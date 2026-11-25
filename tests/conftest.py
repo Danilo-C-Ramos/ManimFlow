@@ -127,3 +127,8 @@ def rendered_example_copy(tmp_path, rendered_example) -> Path:
     path = tmp_path / rendered_example.path.name
     shutil.copytree(rendered_example.path, path)
     return path
+
+
+def attached(received) -> dict[str, str]:
+    """What a message carried besides the lesson's context, which goes with every message."""
+    return {name: text for name, text in received.attachments.items() if name != "contexto-da-aula.md"}

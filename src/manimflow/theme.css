@@ -50,6 +50,7 @@ body {
 .mf-qa .q-btn { color: var(--mf-muted); }
 .mf-inbox { display: flex; gap: 10px; padding: 7px 10px; border-radius: 8px; width: 100%; align-items: flex-start; cursor: pointer; color: inherit; text-decoration: none; }
 .mf-inbox:hover { background: var(--mf-hover); }
+.mf-usage.mf-signin { border-color: #cfdcf3; background: var(--mf-accent-soft); }
 .mf-usage { width: calc(100% - 8px); margin: 6px 4px; padding: 10px; border-radius: 10px; border: 1px solid var(--mf-line); background: var(--mf-bg); font-size: 12px; cursor: pointer; }
 .mf-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; display: inline-block; }
 .mf-badge { border-radius: 7px; display: grid; place-items: center; font-size: 12px; font-weight: 600; flex: none; }
@@ -86,6 +87,9 @@ body {
 .mf-composer .q-btn-toggle .q-btn.bg-primary { background: var(--mf-accent-soft) !important; color: var(--mf-accent) !important; border-color: transparent; }
 .mf-approvebar { border-radius: 14px; background: #fff7e6; color: #7a4b00; font-size: 13px; padding: 6px 8px 6px 12px; width: 100%; }
 .mf-attach { background: #fff6e0; border: 1px solid #f6dfa6; color: #7a4b00; border-radius: 999px; font-size: 12.5px; padding: 2px 4px 2px 10px; }
+/* What the agent is doing now, above the message box. */
+.mf-progress { border: 1px solid #cfdcf3; background: var(--mf-accent-soft); color: #1b3f7a; border-radius: 14px; padding: 6px 6px 6px 12px; font-size: 13px; }
+.mf-progress .q-spinner { color: var(--mf-accent); flex: none; }
 
 /* ── Chat ── */
 .mf-chatcol { height: 100%; width: 100%; display: flex; flex-direction: column; min-height: 0; }
@@ -108,6 +112,16 @@ body {
 .mf-result .mf-foot { padding: 9px 12px; width: 100%; }
 .mf-plan { border: 1px solid var(--mf-line); border-radius: 16px; background: var(--mf-side); padding: 12px 14px; width: 100%; cursor: pointer; gap: 0; }
 .mf-tag { font: 600 11px ui-monospace, monospace; background: var(--mf-bg); border: 1px solid var(--mf-line); border-radius: 6px; padding: 1px 5px; text-align: center; white-space: nowrap; }
+.mf-plan-actions { margin-top: -6px; padding: 0 2px; }
+.mf-divider { font-size: 12px; color: var(--mf-faint); text-align: center; display: flex; align-items: center; gap: 8px; }
+.mf-divider::before, .mf-divider::after { content: ""; flex: 1; border-top: 1px solid var(--mf-line); }
+.mf-welcome { border: 1px solid #f1dca4; background: #fffaf0; border-radius: 16px; padding: 14px 16px; margin: 18px 18px 0; font-size: 13.5px; width: calc(100% - 36px); }
+/* Where the lesson is in its making, in the chat's header. */
+.mf-stages { font-size: 11.5px; color: var(--mf-faint); overflow: hidden; }
+.mf-step { border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
+.mf-step.done { color: #15803d; }
+.mf-step.now { background: var(--mf-accent-soft); color: var(--mf-accent); font-weight: 600; }
+.mf-step.wait { background: #fff1d6; color: #a35400; font-weight: 600; }
 .mf-checkpoint { font-size: 12px; color: var(--mf-faint); width: 100%; }
 .mf-checkpoint::before, .mf-checkpoint::after { content: ""; flex: 1; border-top: 1px dashed var(--mf-line); }
 

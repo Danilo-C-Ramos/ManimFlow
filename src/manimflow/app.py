@@ -1,31 +1,32 @@
 """The NiceGUI app: the lesson screen with its chat. Every UI string is in Portuguese."""
 
+import asyncio
 import logging
 import re
 import socket
-import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
 from nicegui import app, ui
 
-from manimflow import activity
+from manimflow import activity, conversation, plan_turn
 from manimflow.agent import (
     Agent,
     AgentError,
     AssistantText,
+    Checklist,
     CommandFinished,
     CommandStarted,
     Event,
     FileChanged,
     ImageViewed,
-    LoginFailed,
-    Session,
+    Working,
 )
 from manimflow.code_tab import FILES as CODE_FILES
 from manimflow.code_tab import CodeTab
+from manimflow.conversation import ChatTurn, Conversation
 from manimflow.dialogs import turma_url
 from manimflow.equations import EquationsPanel
 from manimflow.export_tab import ExportDialog
@@ -34,17 +35,13 @@ from manimflow.pins import Pin, Pins
 from manimflow.plan import PLAN_FILE, Plan, load_plan
 from manimflow.plan_cards import PlanCards
 from manimflow.preview import PreviewPanel, latest_render, serve_outputs
-from manimflow.render import cache_dir
-from manimflow.sessions import SessionHistory
 from manimflow.settings import SettingsDialog, model_switch
 from manimflow.sidebar import Sidebar, drawer
+from manimflow.sign_in import SignIn
 from manimflow.theme import apply_theme, status_pill, turma_badge
-from manimflow.versioning import OUTSIDE_EDITS, History
+from manimflow.versioning import History, Version
 
 logger = logging.getLogger(__name__)
-
-# The teacher's own edits since the agent's last turn, attached to the next message.
-MANUAL_EDITS = "edicoes-manuais.diff"
 
 _FILE_CHANGES = {"added": "Arquivo criado", "modified": "Arquivo alterado", "deleted": "Arquivo apagado"}
 
@@ -60,6 +57,18 @@ _STEPS = [
     (re.compile(r"\bmanimflow\s+check-continuity\b"), "Conferindo a continuidade"),
     (re.compile(r"\bpytest\b.*\btest_fisica\.py\b"), "Rodando os testes de física"),
 ]
+
+# The lesson's files as the teacher calls them, for "Lendo o plano" or "Escrevendo as cenas".
+_FILES = {
+    "perfil.md": "o perfil do professor",
+    "turma.md": "as instruções da turma",
+    "CONTEXTO.md": "o contexto da aula",
+    "plano.yaml": "o plano",
+    "cenas.py": "as cenas",
+    "fisica.py": "a física",
+    "test_fisica.py": "os testes de física",
+    "SKILL.md": "as instruções do ManimFlow",
+}
 
 
 def serve(agent: Agent, root: Callable[..., Awaitable[None]]) -> None:
@@ -109,11 +118,15 @@ def lesson_page(
     sidebar: Callable[[], object] | None = None,
     opening: Opening = Opening(),
     turma: Turma | None = None,
+    reset_example: Callable[[], object] | None = None,
 ) -> Callable[[], Awaitable[None]]:
-    """Builds the page for one lesson; each browser tab gets its own agent session.
+    """Builds the page for one lesson, which shows the lesson's one conversation.
 
-    `sidebar` draws the side column, such as the map of turmas and lessons.
+    `sidebar` draws the side column, such as the map of turmas and lessons. With
+    `reset_example`, the lesson is the example, and the header offers to bring the
+    original back by calling it.
     """
+    example = reset_example is not None
 
     async def page() -> None:
         apply_theme()
@@ -132,7 +145,7 @@ def lesson_page(
         body = ui.column().classes("w-full")
 
         async def open_chat() -> None:
-            session = await agent.start_session(lesson)
+            talk = conversation.conversation(agent, lesson, example)
             controls.clear()
             body.clear()
             with body:
@@ -141,13 +154,11 @@ def lesson_page(
                 with ui.splitter(value=Workspace.DEFAULT, limits=(22, 80)).classes("mf-split") as splitter:
                     with splitter.before:
                         with ui.column().classes("mf-chatcol") as chat_column:
-                            with ui.row().classes("mf-chathead items-center no-wrap gap-1 w-full"):
-                                ui.label("Conversa").classes("font-semibold grow")
-                                SessionHistory(agent, lesson, current=session)
-                                ui.button("Nova", icon="add", on_click=ui.navigate.reload).props(
-                                    "flat dense no-caps"
-                                ).tooltip("Começar uma conversa nova sobre esta aula")
-                            chat = Chat(session, history, pins)
+                            with ui.row().classes("mf-chathead items-center no-wrap gap-2 w-full"):
+                                ui.label("Conversa").classes("font-semibold")
+                                ui.space()
+                                LessonStage(lesson)
+                            chat = Chat(talk, history, pins, example=example)
                     with splitter.after:
                         with ui.column().classes("mf-ws gap-0 w-full"):
                             with ui.row().classes("mf-tabsbar items-center no-wrap w-full"):
@@ -174,6 +185,8 @@ def lesson_page(
                 show = ui.button("Mostrar prévia", icon="vertical_split").props("flat no-caps dense").mark(
                     "show-workspace"
                 )
+                if reset_example is not None:
+                    ExampleReset(agent, lesson, reset_example, chat)
                 ui.button("Exportar", icon="file_download", on_click=export.open).props(
                     "unelevated no-caps rounded"
                 ).mark("open-export")
@@ -200,15 +213,21 @@ def lesson_page(
                     SettingsDialog(agent, switch, on_signed_out=sign_in)
             if opening.export:
                 export.open()
+            # The conversation so far, and the turn that is running, if any.
+            await chat.load()
             if (first := _first_messages.pop(lesson.absolute(), None)) is not None:
                 # Not awaited here: the page must show before the turn ends.
-                ui.timer(0, lambda: chat.submit(first), once=True)
+                ui.timer(0, lambda: chat.ask(first), once=True)
+
+        async def signed_in() -> None:
+            # The whole page, so the sidebar shows the account too.
+            ui.navigate.reload()
 
         def sign_in() -> None:
             controls.clear()
             body.clear()
             with body:
-                SignIn(agent, on_signed_in=open_chat)
+                SignIn(agent, on_signed_in=signed_in)
 
         if (await agent.account()).logged_in:
             await open_chat()
@@ -296,86 +315,183 @@ class Workspace:
         self.splitter.set_value(min((size for size in self._SIZES if size > current + 1), default=current))
 
 
-class SignIn:
-    """Signs the teacher in with ChatGPT or an API key before the chat opens."""
+class LessonStage:
+    """Where the lesson is in its making, above the chat: plan, the teacher's approval,
+    animation, ready. Kept up to date."""
 
-    def __init__(self, agent: Agent, on_signed_in: Callable[[], Awaitable[None]]) -> None:
-        self.agent = agent
-        self.on_signed_in = on_signed_in
-        with ui.card().classes("mx-auto mt-16 w-full max-w-md items-stretch gap-4"):
-            ui.label("Entre para conversar com o agente").classes("text-lg")
-            ui.label("Use a sua conta do ChatGPT, de qualquer plano, ou uma chave de API da OpenAI.").classes(
-                "text-grey-7"
-            )
-            self.chatgpt = ui.button("Entrar com o ChatGPT", on_click=self.with_chatgpt)
-            self.waiting = ui.label("Termine o login na aba do navegador que acabou de abrir.").classes(
-                "text-grey-7"
-            )
-            self.waiting.set_visibility(False)
-            ui.separator()
-            self.key = (
-                ui.input("Chave de API", password=True, password_toggle_button=True)
-                .props("outlined dense")
-                .mark("api-key")
-            )
-            self.key_button = ui.button("Usar chave de API", on_click=self.with_api_key).props("outline")
-            self.error = ui.label().classes("text-negative")
-            self.error.set_visibility(False)
+    _STEPS = ("Plano", "Sua aprovação", "Animação", "Pronta")
+    _AT = {Status.NEW: 0, Status.PLAN: 1, Status.IN_PROGRESS: 2, Status.READY: 3, Status.EXPORTED: 3}
 
-    async def with_chatgpt(self) -> None:
-        await self._login(None)
+    def __init__(self, lesson: Path) -> None:
+        self.lesson = lesson
+        self.shown: int | None = None
+        self.row = ui.row().classes("mf-stages items-center no-wrap gap-1").mark("lesson-stage")
+        self.refresh()
+        ui.timer(2.0, self.refresh)
 
-    async def with_api_key(self) -> None:
-        await self._login(self.key.value or "")
-
-    async def _login(self, api_key: str | None) -> None:
-        self._set_busy(True, waiting_for_browser=api_key is None)
-        self.error.set_visibility(False)
+    def refresh(self) -> None:
         try:
-            await self.agent.login(api_key)
-        except LoginFailed as failure:
-            self._fail(str(failure))
-            return
+            at = self._AT[status(self.lesson)]
         except Exception:
-            logger.exception("Login failed")
-            self._fail("Não foi possível entrar agora. Tente de novo.")
+            logger.debug("Reading the lesson's status failed", exc_info=True)
             return
-        await self.on_signed_in()
+        if at == self.shown:
+            return
+        self.shown = at
+        self.row.clear()
+        with self.row:
+            for index, name in enumerate(self._STEPS):
+                if index:
+                    ui.icon("chevron_right", size="14px").classes("mf-faint")
+                done = index < at or (index == at == len(self._STEPS) - 1)
+                state = "done" if done else "now" if index == at else "later"
+                if index == at == 1:
+                    state = "wait"
+                with ui.row().classes(f"mf-step {state} items-center no-wrap gap-1").mark(f"stage-{state}"):
+                    if done:
+                        ui.icon("check", size="13px")
+                    ui.label(name)
 
-    def _fail(self, message: str) -> None:
-        self._set_busy(False)
-        self.error.set_text(message)
-        self.error.set_visibility(True)
 
-    def _set_busy(self, busy: bool, waiting_for_browser: bool = False) -> None:
-        self.chatgpt.set_enabled(not busy)
-        self.key_button.set_enabled(not busy)
-        self.waiting.set_visibility(busy and waiting_for_browser)
+class ExampleReset:
+    """"Restaurar exemplo" in the example's header: brings the original back, files and
+    conversation, after a confirmation."""
+
+    def __init__(self, agent: Agent, lesson: Path, reset: Callable[[], object], chat: "Chat") -> None:
+        self.agent = agent
+        self.lesson = lesson
+        self.reset = reset
+        self.chat = chat
+        with ui.dialog() as self.dialog, ui.card().classes("w-[28rem] items-stretch gap-3"):
+            ui.label("Restaurar o exemplo original?").classes("text-lg")
+            ui.label(
+                "O exemplo volta a ser como veio no ManimFlow, e a conversa sobre ele recomeça. "
+                "As suas mudanças continuam no histórico de versões."
+            ).classes("mf-muted")
+            with ui.row().classes("justify-end"):
+                ui.button("Cancelar", on_click=self.dialog.close).props("flat")
+                ui.button("Restaurar", on_click=self._restore).mark("confirm-reset-example")
+        ui.button("Restaurar exemplo", icon="restart_alt", on_click=self._ask).props("flat no-caps dense").mark(
+            "reset-example"
+        )
+
+    def _ask(self) -> None:
+        if self.chat.busy:
+            ui.notify("Espere o agente terminar para restaurar o exemplo.")
+            return
+        self.dialog.open()
+
+    async def _restore(self) -> None:
+        self.dialog.close()
+        if self.chat.busy:
+            ui.notify("Espere o agente terminar para restaurar o exemplo.")
+            return
+        try:
+            self.reset()
+        except Exception:
+            logger.exception("Restoring the example failed")
+            ui.notify("Não foi possível restaurar o exemplo agora. Tente de novo.", type="negative")
+            return
+        # No turn starts in the old conversation while its threads are put away.
+        conversation.conversation(self.agent, self.lesson).closed = True
+        try:
+            await self.agent.archive(self.lesson)
+        except Exception:
+            logger.exception("Archiving the example's conversation failed")
+        finally:
+            # Every tab on the example, this one too, reloads on a new conversation.
+            conversation.forget(self.agent, self.lesson)
+
+
+class Progress:
+    """The bar above the message box while the agent works: what it is doing now, its own
+    list of steps when it keeps one, for how long, and "Parar"."""
+
+    def __init__(self, on_stop: Callable[[], Awaitable[None]]) -> None:
+        self.turn: ChatTurn | None = None
+        self.now = ""
+        with ui.row().classes("mf-progress items-center no-wrap gap-2 w-full").mark("progress") as self.row:
+            ui.spinner(size="sm")
+            with ui.column().classes("gap-0 grow min-w-0"):
+                self.label = ui.label().classes("ellipsis w-full").mark("progress-label")
+                self.steps = ui.label().classes("text-xs mf-faint ellipsis w-full").mark("progress-steps")
+            self.clock = ui.label().classes("text-xs mf-faint whitespace-nowrap")
+            self.stop = (
+                ui.button("Parar", icon="stop_circle", on_click=on_stop)
+                .props("flat dense no-caps size=sm color=grey-8")
+                .mark("stop")
+            )
+        self.row.set_visibility(False)
+        ui.timer(1.0, self._tick)
+
+    def follow(self, turn: ChatTurn) -> None:
+        self.turn = turn
+        self.now = _START
+        for event in turn.events:
+            self.now = _doing(event) or self.now
+        self.stop.set_enabled(True)
+        self.row.set_visibility(True)
+        self.show(turn)
+
+    def show(self, turn: ChatTurn, event: Event | None = None) -> None:
+        if event is not None and (doing := _doing(event)) is not None:
+            # The agent thinks between any two steps; the bar keeps naming the last step,
+            # which tells where in the work it is.
+            if not (doing == _THINKING and self.now != _START):
+                self.now = doing
+        self.label.set_text(f"{self.now}…")
+        self.steps.set_text(_checklist(turn.checklist))
+        self.steps.set_visibility(turn.checklist is not None)
+        self._tick()
+
+    def stopping(self) -> None:
+        self.stop.set_enabled(False)
+        self.label.set_text("Parando…")
+
+    def done(self) -> None:
+        self.turn = None
+        self.row.set_visibility(False)
+
+    def _tick(self) -> None:
+        if self.turn is not None:
+            self.clock.set_text(_clock(self.turn.elapsed))
 
 
 class Chat:
-    def __init__(self, session: Session, history: History, pins: Pins | None = None) -> None:
-        self.session = session
+    """The lesson's conversation on this page: what it said so far, the turn that is
+    running, and the message box. The conversation itself lives on the server."""
+
+    def __init__(self, talk: Conversation, history: History, pins: Pins | None = None, example: bool = False) -> None:
+        self.talk = talk
         self.history = history
-        self.lesson = session.lesson
+        self.lesson = talk.lesson
         self.pins = pins
         # Set once the workspace exists: the result cards open its tabs, the bar approves the plan.
         self.workspace: Workspace | None = None
         self.plan_cards: PlanCards | None = None
-        # Told when a turn starts and ends, for whatever must wait for the agent.
+        # Told when a turn starts and ends, for whatever must wait for the agent, and
+        # before a turn starts, for whatever must be committed first.
         self._busy_listeners: list[Callable[[bool], None]] = []
+        self._before_turn: list[Callable[[], None]] = []
         self._busy = False
+        # Until the conversation so far shows, a message could start a turn the page misses.
+        self._ready = False
+        self._views: dict[int, _TurnView] = {}
+        # The pins this page sent with the running turn, which turn green once it ran.
+        self._sent: list[Pin] = []
+        self._session: str | None = None
+        # The approve buttons inside the chat's plan cards; only the newest shows.
+        self._approve_in_chat: ui.row | None = None
         with ui.scroll_area().classes("mf-thread w-full") as self.scroll:
+            if example:
+                self._welcome()
             self.conversation = ui.column().classes("mf-conversation").mark("conversation")
         with ui.column().classes("mf-composer-wrap"):
-            with ui.row().classes("items-center gap-2 mf-muted text-[13px] px-2") as self.working:
-                ui.spinner(size="sm")
-                ui.label("O agente está trabalhando…")
-            self.working.set_visibility(False)
+            self.progress = Progress(self.stop)
             with ui.column().classes("mf-composer"):
                 with ui.row().classes("mf-approvebar items-center no-wrap gap-2").mark("approve-bar") as self.approve_bar:
                     ui.icon("hourglass_top", size="18px")
-                    ui.label("O plano está esperando você.").classes("grow")
+                    ui.label("O plano está esperando a sua aprovação.").classes("grow")
                     ui.button("Ver plano", on_click=lambda: self.open_tab("Plano")).props(
                         "outline dense no-caps rounded size=sm color=brown-8"
                     ).classes("px-2")
@@ -404,17 +520,54 @@ class Chat:
                     )
         if pins is not None:
             pins.on_change(self._show_attachments)
+        self.input.set_enabled(False)
+        self.button.set_enabled(False)
         ui.timer(1.0, self._show_approve_bar)
 
+    async def load(self) -> None:
+        """Shows the conversation so far, joins the turn that is running and follows the
+        ones to come."""
+        await self.talk.load()
+        if self.talk.closed:
+            # The conversation started over while the page opened, as when the example is
+            # restored in another tab: the page shows the new one once it is there. The
+            # page's timers already have NiceGUI send it before its response timeout; this
+            # keeps it so without them.
+            await ui.context.client.connected()
+            await self.talk.replaced.wait()
+            ui.navigate.reload()
+            return
+        # From here on without awaiting, so no turn starts or ends unseen.
+        self._ready = True
+        with self.conversation:
+            if not self.talk.loaded:
+                # The chat still works; the next page tries to read them again.
+                _error_row("Não foi possível mostrar as mensagens anteriores agora.")
+            for turn in self.talk.ended:
+                self._draw(turn)
+        if self.talk.running is not None:
+            # Joined, not started: what the teacher left uncommitted is the agent's now.
+            self._show_turn(self.talk.running)
+        else:
+            self.input.set_enabled(True)
+            self.button.set_enabled(True)
+        self.talk.listen(self)
+        ui.context.client.on_delete(lambda: self.talk.forget(self))
+        self.scroll.scroll_to(percent=1)
+
     def on_busy(self, listener: Callable[[bool], None]) -> None:
-        """Calls `listener` with True when a turn starts, before anything is committed,
-        and with False when it ends."""
+        """Calls `listener` with True while the agent works on the lesson, and with False
+        when it stops."""
         self._busy_listeners.append(listener)
+
+    def before_turn(self, listener: Callable[[], None]) -> None:
+        """Calls `listener` when a turn starts, before anything is committed."""
+        self._before_turn.append(listener)
 
     @property
     def busy(self) -> bool:
-        """Whether the agent is still working on the last message."""
-        return self._busy
+        """Whether the agent is working on the lesson, or the page isn't ready for it yet."""
+        return self.talk.busy or not self._ready
 
     def open_tab(self, tab: str) -> None:
         if self.workspace is not None:
@@ -425,73 +578,149 @@ class Chat:
         if not text or self.busy:
             return
         self.input.value = ""
-        await self.submit(text)
+        await self.ask(text)
 
-    async def submit(self, text: str, summary: str | None = None) -> bool:
-        """Sends `text` as the teacher's message and shows the agent's turn as it streams.
+    async def ask(self, text: str) -> None:
+        """Sends the teacher's own message. Until the teacher first approves the plan, it
+        asks for the plan (see plan_turn)."""
+        try:
+            planning = plan_turn.pending(self.lesson)
+        except Exception:
+            logger.exception("Reading whether the lesson waits for its plan failed")
+            planning = False
+        turn = await self._start(text, plan=planning)
+        if turn is None or turn.plan is None or not turn.ok:
+            return
+        if turn.plan_written:
+            self.open_tab("Plano")
+        elif turn.plan.approved and self.plan_cards is not None:
+            # The teacher approved it in their own words, after seeing it in the chat, as
+            # the button does; the cards may not have looked at the file since.
+            self.plan_cards.refresh()
+            if self.plan_cards.can_approve:
+                await self.plan_cards.approve()
+
+    async def submit(
+        self,
+        text: str,
+        summary: str | None = None,
+        after: Callable[[ChatTurn | None], None] | None = None,
+        attachments: Sequence[Path] = (),
+    ) -> bool:
+        """Sends `text` as the teacher's message, as it is, with `attachments`; False when
+        the turn failed.
 
         The turn's version is named after `summary` when given, else after `text`.
-        False when the turn failed.
+        `after` runs on the server once the turn's version is saved.
         """
-        self._set_busy(True)
-        pins = self.pins.pending() if self.pins is not None else []
-        with self.conversation:
-            with ui.column().classes("mf-user gap-1"):
-                ui.label(text).classes("whitespace-pre-wrap")
-                for pin in pins:
-                    ui.label(f"📍 {pin.number} · {pin.state}: {pin.text}").classes("text-xs mf-muted")
-        # So the agent's commit holds only what the agent changed.
-        self._save_version(lambda: self.history.commit_manual_edit(OUTSIDE_EDITS))
-        attachments = self._manual_edits() + self._pins_attachment(pins)
-        turn = _Turn(self.conversation)
-        ok = delivered = True
-        try:
-            async for event in self.session.send(text, attachments):
-                ok = ok and not isinstance(event, AgentError)
-                delivered = delivered and not (isinstance(event, AgentError) and not event.delivered)
-                with self.conversation:
-                    turn.show(event)
-                self.scroll.scroll_to(percent=1)
-        except Exception:
-            # The engine's own message is in English and meant for developers.
-            logger.exception("Agent turn failed")
-            with self.conversation:
-                _error_row("O agente parou por um erro inesperado.")
-            ok = False
-        finally:
-            turn.finish(ok)
-            # Even a failed turn may have changed files, and they must not be lost. A message
-            # the agent never got leaves the manual edits and the pins for the next one.
-            version = None
-            if delivered:
-                version = self._save_version(lambda: self.history.commit_agent_turn(summary or text))
-                if self.pins is not None and pins:
-                    self.pins.resolved(pins)
-            with self.conversation:
-                self._results(turn)
-                if version is not None:
-                    self._checkpoint(version)
-            self.scroll.scroll_to(percent=1)
-            self._set_busy(False)
-        return ok
+        turn = await self._start(text, summary=summary, after=after, attachments=attachments)
+        if turn is None and after is not None:
+            # It never started: what the caller did ahead of it is undone as for a failure.
+            after(None)
+        return turn is not None and turn.ok
 
-    def _manual_edits(self) -> list[Path]:
-        """The diff of the teacher's edits since the agent's last turn, as an attachment
-        file, so the agent builds on them; none when there are no such edits."""
-        try:
-            diff = self.history.manual_changes()
-            if not diff:
-                return []
-            attachment = cache_dir(self.session.lesson) / MANUAL_EDITS
-            # As is: the diff holds each file's own line endings.
-            attachment.write_text(diff, encoding="utf-8", newline="")
-        except Exception:
-            # The message still goes: the teacher can tell the agent what they changed.
-            logger.exception("Manual changes failed")
+    async def _start(
+        self,
+        text: str,
+        summary: str | None = None,
+        plan: bool = False,
+        after: Callable[[ChatTurn], None] | None = None,
+        attachments: Sequence[Path] = (),
+    ) -> ChatTurn | None:
+        if self.talk.closed:
+            # The example was restored in another tab.
+            ui.navigate.reload()
+            return None
+        if self.busy:
+            ui.notify("Espere o agente terminar.")
+            return None
+        pins = self.pins.pending() if self.pins is not None else []
+        attachments = [*attachments, *self._pins_attachment(pins)]
+        self._sent = pins
+        task = self.talk.start(
+            text,
+            summary=summary,
+            notes=[f"📍 {pin.number} · {pin.state}: {pin.text}" for pin in pins],
+            attachments=attachments,
+            plan=plan,
+            after=after,
+        )
+        # The turn goes on if the page goes away.
+        return await asyncio.shield(task)
+
+    async def stop(self) -> None:
+        self.progress.stopping()
+        await self.talk.stop()
+
+    # The conversation tells every page that shows it.
+
+    def turn_started(self, turn: ChatTurn) -> None:
+        for listener in self._before_turn:
+            listener()
+        self._show_turn(turn)
+
+    def _show_turn(self, turn: ChatTurn) -> None:
+        self._set_busy(True)
+        with self.conversation:
+            view = self._bubble(turn)
+            for event in turn.events:
+                view.show(event)
+        self.progress.follow(turn)
+        self.scroll.scroll_to(percent=1)
+
+    def turn_event(self, turn: ChatTurn, event: Event) -> None:
+        view = self._views.get(id(turn))
+        if view is None:
+            return
+        if not isinstance(event, (Working, Checklist)):
             with self.conversation:
-                _error_row("Não foi possível mandar ao agente as suas edições no código.")
-            return []
-        return [attachment]
+                view.show(event)
+            self.scroll.scroll_to(percent=1)
+        self.progress.show(turn, event)
+
+    def turn_ended(self, turn: ChatTurn) -> None:
+        view = self._views.get(id(turn))
+        if view is not None:
+            with self.conversation:
+                self._close(turn, view, live=True)
+        if self._sent and turn.delivered and self.pins is not None:
+            self.pins.resolved(self._sent)
+        self._sent = []
+        self.progress.done()
+        self.scroll.scroll_to(percent=1)
+        self._set_busy(False)
+
+    def conversation_closed(self) -> None:
+        with self.conversation:
+            ui.navigate.reload()
+
+    def _draw(self, turn: ChatTurn) -> None:
+        """A turn that already ended."""
+        view = self._bubble(turn)
+        for event in turn.events:
+            view.show(event)
+        self._close(turn, view, live=False)
+
+    def _bubble(self, turn: ChatTurn) -> "_TurnView":
+        if turn.session is not None and self._session is not None and turn.session != self._session:
+            when = f" de {_when(turn.started_at)}" if turn.started_at is not None else ""
+            ui.label(f"Conversa{when}").classes("mf-divider w-full").mark("session-divider")
+        self._session = turn.session or self._session
+        with ui.column().classes("mf-user gap-1"):
+            ui.label(turn.request).classes("whitespace-pre-wrap")
+            for note in turn.notes:
+                ui.label(note).classes("text-xs mf-muted")
+        view = _TurnView(turn)
+        self._views[id(turn)] = view
+        return view
+
+    def _close(self, turn: ChatTurn, view: "_TurnView", live: bool) -> None:
+        view.finish(turn.ok, turn.seconds)
+        for problem in turn.problems:
+            _error_row(problem)
+        self._results(turn, view, live)
+        if turn.version is not None:
+            self._checkpoint(turn.version)
 
     def _pins_attachment(self, pins: list[Pin]) -> list[Path]:
         if not pins or self.pins is None:
@@ -500,32 +729,15 @@ class Chat:
             return [self.pins.attachment(pins)]
         except Exception:
             logger.exception("Writing the pinned comments failed")
-            with self.conversation:
-                _error_row("Não foi possível mandar ao agente os comentários na imagem.")
+            ui.notify("Não foi possível mandar ao agente os comentários na imagem.", type="negative")
             return []
-
-    def _save_version(self, commit: Callable[[], str | None]) -> str | None:
-        """Runs `commit` and returns the new version's id, telling the teacher when the
-        version couldn't be saved; the chat goes on either way."""
-        try:
-            return commit()
-        except Exception:
-            logger.exception("Commit failed")
-            with self.conversation:
-                _error_row("Não foi possível salvar uma versão desta mudança.")
-            return None
 
     def _set_busy(self, busy: bool) -> None:
         if busy == self._busy:
             return
         self._busy = busy
-        if busy:
-            activity.start(self.lesson)
-        else:
-            activity.stop(self.lesson)
         self.input.set_enabled(not busy)
         self.button.set_enabled(not busy)
-        self.working.set_visibility(busy)
         self._show_approve_bar()
         for listener in self._busy_listeners:
             listener(busy)
@@ -537,7 +749,10 @@ class Chat:
         except Exception:
             logger.debug("Reading the lesson's status failed", exc_info=True)
             return
-        self.approve_bar.set_visibility(waiting and not self.busy)
+        shown = waiting and not self.busy
+        self.approve_bar.set_visibility(shown)
+        if self._approve_in_chat is not None and not self._approve_in_chat.is_deleted:
+            self._approve_in_chat.set_visibility(shown)
 
     async def _approve(self) -> None:
         if self.plan_cards is not None:
@@ -562,21 +777,46 @@ class Chat:
         if self.pins is not None:
             self.pins.remove(pin)
 
-    def _results(self, turn: "_Turn") -> None:
-        """Cards for what the turn produced, each opening the tab that shows it."""
-        if PLAN_FILE in turn.files:
+    def _welcome(self) -> None:
+        """The example's own introduction, from the app: it spends no quota."""
+        with ui.column().classes("mf-welcome gap-2").mark("example-welcome"):
+            ui.label("Esta é a aula de exemplo").classes("font-semibold text-[14.5px]")
+            ui.label(
+                "Um herói voa a 0,6c em direção a um espelho na Terra e acompanha um raio de luz que vai, "
+                "reflete e volta até ele. As animações já estão prontas na prévia ao lado."
+            )
+            ui.label(
+                "Pergunte o que quiser sobre a aula ou peça mudanças: esta cópia é sua, "
+                "e “Restaurar exemplo”, lá em cima, traz o original de volta."
+            ).classes("mf-muted")
+            with ui.row().classes("gap-2 flex-wrap"):
+                for suggestion in SUGGESTIONS:
+                    ui.button(suggestion, on_click=lambda text=suggestion: self._suggest(text)).props(
+                        "outline no-caps rounded dense size=sm"
+                    ).classes("px-2").mark("suggestion")
+
+    def _suggest(self, text: str) -> None:
+        self.input.value = text
+        self.input.run_method("focus")
+
+    def _results(self, turn: ChatTurn, view: "_TurnView", live: bool) -> None:
+        """Cards for what the turn produced, each opening the tab that shows it. A turn drawn
+        again, when the page opens, gets a small card: the plan and the images may have
+        changed since it ran."""
+        if PLAN_FILE in view.files or turn.plan_written:
             plan, _ = load_plan(self.lesson)
             if plan is not None and not all(state.scene == PLACEHOLDER_SCENE for state in plan.states):
-                self._plan_card(plan)
-        if turn.rendered:
-            self._preview_card()
-        elif changed := sorted(turn.files & set(CODE_FILES)):
-            with ui.row().classes("mf-result items-center no-wrap gap-2 px-3 py-2").on(
-                "click", lambda: self.open_tab("Código")
-            ).mark("result-code"):
-                ui.icon("code", color="primary")
-                ui.label("Código alterado: " + ", ".join(changed)).classes("grow")
-                ui.label("Ver código →").classes("text-xs mf-faint")
+                if live:
+                    self._plan_card(plan)
+                else:
+                    _small_card("view_carousel", "Plano atualizado", "Ver plano →", lambda: self.open_tab("Plano"), "result-plan")
+        if view.rendered:
+            if live:
+                self._preview_card()
+            else:
+                _small_card("movie", "Prévia atualizada", "Abrir →", lambda: self.open_tab("Prévia"), "result-preview")
+        elif changed := sorted(view.files & set(CODE_FILES)):
+            _small_card("code", "Código alterado: " + ", ".join(changed), "Ver código →", lambda: self.open_tab("Código"), "result-code")
 
     def _plan_card(self, plan: Plan) -> None:
         transitions = {transition.source: transition for transition in plan.transitions}
@@ -595,6 +835,22 @@ class Chat:
                             ui.label(state.visible).classes("text-xs mf-muted")
                 if (transition := transitions.get(state.id)) and transition.duration is not None:
                     ui.label(f"↓ {_seconds(transition.duration)} s").classes("text-xs mf-muted pl-12")
+        # Outside the card's labels: the buttons only show while the plan waits for the teacher.
+        with ui.row().classes("mf-plan-actions items-center no-wrap gap-2 w-full").mark("approve-in-chat") as actions:
+            ui.button("Aprovar e animar", icon="check", on_click=self._approve).props(
+                "unelevated no-caps rounded dense"
+            ).classes("px-3").mark("approve-in-chat-button")
+            ui.button("Ver e editar os cartões", on_click=lambda: self.open_tab("Plano")).props(
+                "outline no-caps rounded dense"
+            ).classes("px-3")
+        if self._approve_in_chat is not None and not self._approve_in_chat.is_deleted:
+            self._approve_in_chat.set_visibility(False)
+        self._approve_in_chat = actions
+        actions.set_visibility(False)
+        if self.plan_cards is not None:
+            # So the approval shows with the card, not on the cards' next look at the file.
+            self.plan_cards.refresh()
+        self._show_approve_bar()
 
     def _preview_card(self) -> None:
         plan, _ = load_plan(self.lesson)
@@ -612,11 +868,11 @@ class Chat:
                 ui.label("Prévia atualizada").classes("grow")
                 ui.label("Abrir →").classes("text-xs mf-faint")
 
-    def _checkpoint(self, version: str) -> None:
-        when = datetime.now()
+    def _checkpoint(self, version: Version) -> None:
+        when = version.when.astimezone()
         with ui.row().classes("mf-checkpoint items-center no-wrap gap-2").mark("checkpoint"):
-            ui.label(f"Versão salva às {when:%H:%M}")
-            ui.button("Restaurar", icon="restore", on_click=lambda: self._confirm_restore(version, when)).props(
+            ui.label(f"Versão salva {_at(when)}")
+            ui.button("Restaurar", icon="restore", on_click=lambda: self._confirm_restore(version.id, when)).props(
                 "flat dense no-caps size=sm color=grey-7"
             ).mark("restore")
 
@@ -625,7 +881,7 @@ class Chat:
             ui.notify("Espere o agente terminar para voltar a uma versão.")
             return
         with ui.dialog() as dialog, ui.card().classes("w-[28rem] items-stretch gap-3"):
-            ui.label(f"Voltar a aula para a versão das {when:%H:%M}?").classes("text-lg")
+            ui.label(f"Voltar a aula para a versão {_at(when)}?").classes("text-lg")
             ui.label(
                 "Os arquivos da aula ficam como estavam logo depois deste pedido. "
                 "O que veio depois continua no histórico, e o agente fica sabendo da volta na próxima mensagem."
@@ -645,17 +901,24 @@ class Chat:
             return
         with self.conversation:
             with ui.row().classes("mf-checkpoint items-center no-wrap gap-2"):
-                ui.label(f"A aula voltou para a versão das {when:%H:%M}")
-        ui.notify(f"A aula voltou para a versão das {when:%H:%M}.", type="positive")
+                ui.label(f"A aula voltou para a versão {_at(when)}")
+        ui.notify(f"A aula voltou para a versão {_at(when)}.", type="positive")
 
 
-class _Turn:
+# What the example's welcome suggests asking.
+SUGGESTIONS = (
+    "Explique o que acontece entre S1 e S2",
+    "Mude a cor da luz para amarelo",
+    "Deixe a transição S2 → S2b mais lenta",
+)
+
+
+class _TurnView:
     """One agent turn in the chat: its texts in order, with the steps between them grouped in
     a collapsible block, and what it changed, for the result cards."""
 
-    def __init__(self, conversation: ui.column) -> None:
-        self.conversation = conversation
-        self.started = time.monotonic()
+    def __init__(self, turn: ChatTurn) -> None:
+        self.turn = turn
         self.block: ui.expansion | None = None
         self.blocks: list[tuple[ui.expansion, list[bool]]] = []
         self.files: set[str] = set()
@@ -667,10 +930,10 @@ class _Turn:
                 self.block = None
                 ui.markdown(text).classes("mf-agent w-full")
             case CommandStarted(_, command):
-                with self._step(_step(command) or "Rodando um comando"):
+                with self._step(_doing(event) or "Rodando um comando"):
                     with _event_row("terminal", "grey-7"):
                         with ui.column().classes("gap-0 min-w-0"):
-                            if step := _step(command):
+                            if step := _step(command) or _reading(event.reads):
                                 ui.label(step)
                             ui.label(command).classes("font-mono mf-cmd")
             case CommandFinished(_, command):
@@ -706,15 +969,81 @@ class _Turn:
             _set_header(self.block, f"{now}…")
         return self.block
 
-    def finish(self, ok: bool) -> None:
+    def finish(self, ok: bool, seconds: float | None) -> None:
         """Labels each block with its number of steps and the turn's duration."""
-        seconds = round(time.monotonic() - self.started)
         for block, steps in self.blocks:
             failed = any(steps)
             count = len(steps)
-            _set_header(block, f"{count} passo{'' if count == 1 else 's'} · {_duration(seconds)}")
+            header = f"{count} passo{'' if count == 1 else 's'}"
+            if seconds is not None:
+                header += f" · {_duration(round(seconds))}"
+            _set_header(block, header)
             block.props(f"icon={'error_outline' if failed or not ok else 'check_circle_outline'}")
         self.block = None
+
+
+def _small_card(icon: str, title: str, action: str, on_click: Callable[[], None], marker: str) -> None:
+    with ui.row().classes("mf-result items-center no-wrap gap-2 px-3 py-2").on("click", on_click).mark(marker):
+        ui.icon(icon, color="primary")
+        ui.label(title).classes("grow")
+        ui.label(action).classes("text-xs mf-faint")
+
+
+def _doing(event: Event) -> str | None:
+    """What the agent is doing, as the progress bar says it, after this event."""
+    match event:
+        case CommandStarted(_, command):
+            return _step(command) or _reading(event.reads) or "Rodando um comando"
+        case FileChanged(path, change):
+            if change == "deleted":
+                return f"Apagando {Path(path).name}"
+            return f"Escrevendo {_FILES.get(Path(path).name, Path(path).name)}"
+        case ImageViewed(path):
+            return f"Olhando a imagem {Path(path).name}"
+        case Working(label):
+            return label
+    return None
+
+
+_START = "Enviando o pedido"
+_THINKING = "Pensando"
+
+
+def _reading(files: tuple[str, ...]) -> str | None:
+    """"Lendo o plano e as cenas" for a command that only reads those files."""
+    if not files:
+        return None
+    if files == (".",):
+        return "Procurando arquivos da aula"
+    names = list(dict.fromkeys(_FILES.get(Path(path).name, Path(path).name) for path in files))
+    return "Lendo " + (names[0] if len(names) == 1 else ", ".join(names[:-1]) + " e " + names[-1])
+
+
+def _checklist(checklist: Checklist | None) -> str:
+    if checklist is None or not checklist.steps:
+        return ""
+    steps = checklist.steps
+    done = sum(step.status == "completed" for step in steps)
+    current = next((step.text for step in steps if step.status == "inProgress"), None)
+    at = min(done + 1, len(steps))
+    return f"Etapa {at} de {len(steps)}" + (f": {current}" if current else "")
+
+
+def _clock(seconds: float) -> str:
+    seconds = int(seconds)
+    return f"{seconds // 60}:{seconds % 60:02d}"
+
+
+def _at(when: datetime) -> str:
+    """"às 14:32" today, "em 25/11 às 14:32" on another day."""
+    if when.date() == datetime.now().astimezone().date():
+        return f"às {when:%H:%M}"
+    return f"em {when:%d/%m} às {when:%H:%M}"
+
+
+def _when(moment: datetime) -> str:
+    """The moment in the teacher's own time zone."""
+    return moment.astimezone().strftime("%d/%m/%Y %H:%M")
 
 
 def _set_header(block: ui.expansion, text: str) -> None:

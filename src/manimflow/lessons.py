@@ -8,6 +8,7 @@ lessons with a `turma.md` (ADR 0004). See docs/lessons.md.
 
 import hashlib
 import json
+import os
 import re
 import shutil
 from dataclasses import dataclass
@@ -51,7 +52,10 @@ _SCAFFOLD = _PACKAGE / "modelo"
 # The scene of the scaffold's placeholder state, until the agent writes the plan.
 PLACEHOLDER_SCENE: str = yaml.safe_load((_SCAFFOLD / PLAN_FILE).read_text(encoding="utf-8"))["estados"][0]["cena"]
 _EXAMPLES = _PACKAGE / "exemplos"
+# The example comes with a preview of every scene, so it shows its animations at once.
+_PREVIEWS = Path(OUTPUT_DIR) / "previa"
 EXAMPLE_NAME = "Relatividade - herói e espelho"
+EXAMPLE_RESTORED = "Exemplo restaurado"
 # The bundled example's profile is also every teacher's first one.
 _DEFAULT_PROFILE = _EXAMPLES / PROFILE_FILE
 
@@ -283,20 +287,53 @@ class Library:
         examples = self.data / "exemplo"
         example = examples / EXAMPLE_NAME
         if not (examples / PROFILE_FILE).is_file() or not _is_lesson(example):
-            # Copied aside and then moved in, so a copy cut short is never taken for the example.
-            staging = self.data / "exemplo.novo"
-            shutil.rmtree(staging, ignore_errors=True)
-            staging.mkdir(parents=True)
-            # Its own profile, which the bundled CONTEXTO.md relies on.
-            shutil.copy(_DEFAULT_PROFILE, staging)
-            shutil.copytree(_EXAMPLES / "relatividade", staging / EXAMPLE_NAME)
-            shutil.rmtree(examples, ignore_errors=True)
-            staging.rename(examples)
+            self._copy_example()
+        else:
+            # A copy made before the previews came with the example gets the ones it lacks;
+            # what the teacher rendered since is newer, and the preview shows the newest.
+            _add_missing(_EXAMPLES / "relatividade" / _PREVIEWS, example / _PREVIEWS)
         if not approval_file(example).exists():
             # Its plan was agreed long ago: it doesn't wait for the teacher's approval,
             # also in a copy made before approvals were recorded.
             History.open(example).approve_plan()
         return example
+
+    def reset_example(self) -> Path:
+        """Brings the example's copy back to the bundled original, as a new version: the
+        teacher's changes stay in its history.
+
+        In place, inside the folder: on Windows, the folder and its history are held open
+        while the app shows the example, so they can be neither removed nor replaced.
+        """
+        example = self.example()
+        bundled = _EXAMPLES / "relatividade"
+        # Copied over first: Windows lets a file that is being read, such as a preview
+        # video playing, be overwritten but not deleted.
+        shutil.copytree(bundled, example, dirs_exist_ok=True)
+        shutil.copy(_DEFAULT_PROFILE, example.parent / PROFILE_FILE)
+        for path in _not_in(bundled, example):
+            if path.is_dir():
+                path.rmdir()
+            else:
+                path.unlink()
+        history = History.open(example)
+        history.commit_manual_edit(EXAMPLE_RESTORED)
+        history.start_over()
+        # Its plan was agreed long ago, as in a fresh copy.
+        history.approve_plan()
+        return example
+
+    def _copy_example(self) -> None:
+        examples = self.data / "exemplo"
+        # Copied aside and then moved in, so a copy cut short is never taken for the example.
+        staging = self.data / "exemplo.novo"
+        shutil.rmtree(staging, ignore_errors=True)
+        staging.mkdir(parents=True)
+        # Its own profile, which the bundled CONTEXTO.md relies on.
+        shutil.copy(_DEFAULT_PROFILE, staging)
+        shutil.copytree(_EXAMPLES / "relatividade", staging / EXAMPLE_NAME)
+        shutil.rmtree(examples, ignore_errors=True)
+        staging.rename(examples)
 
     def _config(self) -> dict:
         try:
@@ -308,6 +345,33 @@ class Library:
     def _save_config(self, config: dict) -> None:
         self.data.mkdir(parents=True, exist_ok=True)
         (self.data / _CONFIG).write_text(json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _not_in(source: Path, target: Path) -> list[Path]:
+    """What `target` holds that `source` doesn't, its history aside; inner paths first."""
+    found: list[Path] = []
+    for folder, dirs, names in os.walk(target):
+        here = Path(folder)
+        if here == target:
+            dirs[:] = [name for name in dirs if name != ".git"]
+        for name in dirs + names:
+            path = here / name
+            if not (source / path.relative_to(target)).exists():
+                found.append(path)
+    # An extra folder's contents are listed after it; deleting from the end empties it first.
+    return found[::-1]
+
+
+def _add_missing(source: Path, target: Path) -> None:
+    """Copies the files of `source` that `target` lacks, dated long ago, so a render the
+    teacher made before stays the newest of its scene."""
+    for path in source.rglob("*"):
+        copy = target / path.relative_to(source)
+        if path.is_file() and not copy.exists():
+            copy.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(path, copy)
+            # Not 0, which the status reads as "never rendered".
+            os.utime(copy, (1, 1))
 
 
 def _name_error(name: str, what: str = "aula") -> str | None:

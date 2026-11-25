@@ -156,11 +156,11 @@ async def test_input_is_disabled_while_the_turn_runs(tmp_path):
 
         await user.should_see("Começando.", retries=20)
         assert not input_enabled(user)
-        await user.should_see("O agente está trabalhando…")
+        await user.should_see(marker="progress")
 
         await user.should_see("Terminei.", retries=20)
         assert input_enabled(user)
-        await user.should_not_see("O agente está trabalhando…")
+        await user.should_not_see(marker="progress")
 
 
 async def test_an_agent_error_is_shown_in_portuguese_and_the_chat_recovers(tmp_path):

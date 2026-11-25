@@ -41,7 +41,7 @@ def light_color(lesson):
 
 
 async def send(agent, lesson, text):
-    session = await agent.start_session(lesson)
+    session = await agent.session(lesson)
     events = [event async for event in session.send(text)]
     print(*events, sep="\n")
     assert not [event for event in events if isinstance(event, AgentError)]

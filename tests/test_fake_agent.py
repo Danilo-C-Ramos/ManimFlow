@@ -18,7 +18,7 @@ async def test_replays_each_turn_and_applies_its_file_edits(tmp_path):
             [AssistantText("Pronto.")],
         ]
     )
-    session = await agent.start_session(tmp_path)
+    session = await agent.session(tmp_path)
 
     first = await collect(session.send("muda a cor da luz"))
     second = await collect(session.send("obrigado"))
@@ -36,7 +36,7 @@ async def test_replays_each_turn_and_applies_its_file_edits(tmp_path):
 async def test_editing_an_existing_file_reports_a_modification(tmp_path):
     (tmp_path / "cenas.py").write_text("antes\n", encoding="utf-8")
     agent = ScriptedAgent([[EditFile("cenas.py", "depois\n")]])
-    session = await agent.start_session(tmp_path)
+    session = await agent.session(tmp_path)
 
     events = await collect(session.send("muda"))
 
@@ -54,7 +54,7 @@ async def test_a_command_s_output_is_written_without_reporting_a_file_change(tmp
             ]
         ]
     )
-    session = await agent.start_session(tmp_path)
+    session = await agent.session(tmp_path)
 
     events = await collect(session.send("renderiza"))
 
@@ -67,10 +67,36 @@ async def test_a_command_s_output_is_written_without_reporting_a_file_change(tmp
 
 async def test_reports_an_error_when_the_scenario_runs_out(tmp_path):
     agent = ScriptedAgent([[AssistantText("Oi.")]])
-    session = await agent.start_session(tmp_path)
+    session = await agent.session(tmp_path)
     await collect(session.send("oi"))
 
     events = await collect(session.send("e agora?"))
 
     assert len(events) == 1
     assert isinstance(events[0], AgentError)
+
+
+async def test_the_lessons_conversation_continues_and_keeps_its_history(tmp_path):
+    agent = ScriptedAgent([[AssistantText("Primeira.")], [AssistantText("Segunda.")]])
+    await collect((await agent.session(tmp_path)).send("um"))
+
+    # Coming back to the lesson continues the same conversation.
+    events = await collect((await agent.session(tmp_path)).send("dois"))
+
+    assert events == [AssistantText("Segunda.")]
+    history = await agent.lesson_history(tmp_path)
+    assert [(past.request, past.events) for past in history] == [
+        ("um", [AssistantText("Primeira.")]),
+        ("dois", [AssistantText("Segunda.")]),
+    ]
+
+
+async def test_stop_interrupts_the_turn(tmp_path):
+    agent = ScriptedAgent([[AssistantText("Começando."), AssistantText("Terminei.")]])
+    session = await agent.session(tmp_path)
+    events = []
+    async for event in session.send("faz"):
+        events.append(event)
+        await session.stop()
+
+    assert events == [AssistantText("Começando."), AgentError("A resposta foi interrompida antes de terminar.")]

@@ -42,6 +42,8 @@ _APPROVED_PLAN = "manimflow-plano-aprovado"
 RESTORED = "Voltei para a versão de {when}"
 # Points at the lesson as the agent last left it, whether its turn committed or not.
 _LAST_AGENT_TURN = "refs/manimflow/last-agent-turn"
+# Ends the message of a turn's version, so the chat finds the version of each past turn.
+_TURN = "\n\nTurno: "
 
 # Everything a render or a test run can reproduce. Kept in .git/info/exclude
 # rather than a .gitignore, so the teacher's folder gets no extra file.
@@ -82,14 +84,15 @@ class History:
             history._mark_agent_turn()
         return history
 
-    def commit_agent_turn(self, request: str) -> str | None:
+    def commit_agent_turn(self, request: str, turn: str | None = None) -> str | None:
         """Commits what the agent changed during the turn for `request`, the teacher's
         message, and returns the commit's id, or None when the turn changed no file.
+        `turn` is the turn's id in the agent's conversation.
 
         Call it after every turn, even one that changed nothing: the turn received
         the manual changes with its message, so they start over from here.
         """
-        commit = self._commit(f"Pedido: {request}")
+        commit = self._commit(f"Pedido: {request}" + (f"{_TURN}{turn}" if turn else ""))
         self._mark_agent_turn()
         return commit
 
@@ -115,6 +118,11 @@ class History:
             if patch is not None and PLAN_FILE not in (patch.delta.old_file.path, patch.delta.new_file.path)
         )
 
+    def start_over(self) -> None:
+        """Starts the teacher's changes over from the lesson as it is now, as when its files
+        were brought back to an original: none of that is the teacher's to tell the agent."""
+        self._mark_agent_turn()
+
     def approve_plan(self) -> None:
         """Records plano.yaml as it is now as the plan the teacher approved."""
         workdir = Path(self._repo.workdir)
@@ -124,10 +132,16 @@ class History:
         """The lesson's versions, newest first."""
         if self._repo.head_is_unborn:
             return []
-        return [
-            Version(str(commit.id), commit.message.strip(), datetime.fromtimestamp(commit.commit_time).astimezone())
-            for commit in self._repo.walk(self._repo.head.target)
-        ]
+        versions = []
+        for commit in self._repo.walk(self._repo.head.target):
+            message, _, turn = commit.message.strip().partition(_TURN)
+            when = datetime.fromtimestamp(commit.commit_time).astimezone()
+            versions.append(Version(str(commit.id), message, when, turn.strip() or None))
+        return versions
+
+    def turn_versions(self) -> dict[str, "Version"]:
+        """The version each agent turn saved, by the turn's id."""
+        return {version.turn: version for version in self.versions() if version.turn is not None}
 
     def restore(self, version: str) -> str | None:
         """Brings the lesson's versioned files back to `version`, as a new version made by
@@ -188,6 +202,8 @@ class Version:
     message: str
     # Aware, in the teacher's time zone.
     when: datetime
+    # The agent turn that saved it, if one did.
+    turn: str | None = None
 
 
 def approval_file(lesson: Path) -> Path:

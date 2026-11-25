@@ -123,7 +123,7 @@ File names inside a lesson are in Portuguese because the teacher reads them. The
 
 ### 6.5 Plan before code
 
-- For a new lesson, the agent first writes `plano.yaml`: states S0..Sn, what each one shows, and what each transition does with its approximate duration.
+- For a new lesson, the agent first writes `plano.yaml`: states S0..Sn, what each one shows, and what each transition does with its approximate duration. Until the first approval, ManimFlow asks for the plan in a fixed format and writes the file itself ([the plan turn](plan.md#the-plan-turn)).
 - The UI draws the plan as cards. The teacher edits text inline, comments on individual cards and presses "Aprovar plano", which sends all the feedback to the agent in one message.
 - After rendering, each card gains the PNG thumbnail of its state, and the cards become the timeline.
 - Small requests ("muda a cor da luz") skip the plan.
@@ -149,7 +149,7 @@ File names inside a lesson are in Portuguese because the teacher reads them. The
   - looks at the frames.
 - At most 4 automatic attempts per request. If it still is not right, the agent shows what it has and says what is missing.
 - High quality is rendered only on export.
-- Every session starts a new conversation thread, with `CONTEXTO.md` as the memory. Old threads stay browsable.
+- A lesson has one conversation, which every message continues and the server keeps while the app runs; `CONTEXTO.md` still holds the lesson's rules and decisions. See [ADR 0005](adr/0005-a-lesson-has-one-conversation.md), which replaced "every session starts a new thread".
 - Manual code edits by the teacher are committed, and their diff goes to the agent with the next message.
 - Generated code carries intent comments ("# este movimento mostra…").
 

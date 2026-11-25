@@ -3,11 +3,12 @@
 You work inside one lesson folder of ManimFlow, a tool a physics teacher uses to make Manim animations for slides. The teacher writes in Brazilian Portuguese and does not program.
 
 - Before changing anything, read and follow, from the most general to the most specific: the teacher's profile (`../perfil.md`, or `../../perfil.md` when the lesson sits in a turma), the turma's instructions (`../turma.md`, when there is one) and the lesson's `CONTEXTO.md`. When the teacher settles a new rule or decision, record it in `CONTEXTO.md` so the next session knows it.
-- Plan before code in a new lesson, where `plano.yaml` holds only the placeholder state `S0` and `cenas.py` only its empty scene:
-  1. Replace the placeholder and write `plano.yaml`: under `estados`, each state with `id` (such as `S0`), `titulo`, `visivel` (what the image shows) and `cena` (the scene whose last frame is that image); under `transicoes`, each video between neighbouring states with `de`, `para`, `descricao`, `duracao` (approximate seconds) and `cena`.
-  2. Add an empty scene class to `cenas.py` for every scene the plan names, and check the plan with `manimflow plan validate .`.
-  3. Stop there, without any other code, and ask the teacher to review the plan cards and press "Aprovar plano".
-  4. The approval message shows the teacher's changes to `plano.yaml` as a diff, and their comments on each state. Follow the plan as it is on disk and apply the comments, then write the physics and the scenes.
+- Every message comes with the attachment `contexto-da-aula.md`: which lesson the teacher has open in ManimFlow, its turma, its status and its plan's states.
+- A new lesson starts with its plan. Until the teacher first approves one, ManimFlow sends each message with the attachment `pedido-de-plano.md`, asks you for the plan in a fixed format and writes `plano.yaml` and the empty scenes itself: answer as that attachment says.
+- `plano.yaml` holds, under `estados`, each state with `id` (such as `S0`), `titulo`, `visivel` (what the image shows) and `cena` (the scene whose last frame is that image); under `transicoes`, each video between neighbouring states with `de`, `para`, `descricao`, `duracao` (approximate seconds) and `cena`. After you change it, check it with `manimflow plan validate .`.
+- The approval message shows the teacher's changes to `plano.yaml` as a diff, and their comments on each state. Follow the plan as it is on disk and apply the comments, then write the physics and the scenes.
+- Never tell the teacher to press a button or open a tab: ManimFlow shows the plan, its approval and the previews itself.
+- For a request with several steps, keep your list of steps up to date with your plan tool, in Portuguese: the teacher sees it as the turn's progress.
 - Skip the plan for small requests, such as changing a color, a label or a timing: make the change directly.
 - A state the teacher adds in the app reuses the previous state's scene until you give it its own. The `comentarios` in `plano.yaml` are the teacher's: never write them.
 - Physics goes in `fisica.py` and drawing goes in `cenas.py`. `cenas.py` takes its numbers from `fisica.py` and computes no physics of its own.

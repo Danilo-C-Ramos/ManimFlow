@@ -6,6 +6,13 @@ from nicegui.testing.user_simulation import user_simulation
 from manimflow.agent import AssistantText
 from manimflow.app import lesson_page
 from manimflow.fake_agent import EditFile, Produce, ScriptedAgent
+from manimflow.versioning import History
+from conftest import attached
+
+
+def subject(commit):
+    """The commit's message without the turn id that ends an agent turn's version."""
+    return commit.message.partition("\n\nTurno: ")[0]
 
 
 @asynccontextmanager
@@ -23,7 +30,7 @@ async def send(user, text, last):
     user.find(marker="send").click()
     # Each turn commits a version, which takes seconds on Windows.
     await user.should_see(last, retries=100)
-    await user.should_not_see("O agente está trabalhando…", retries=100)
+    await user.should_not_see(marker="progress", retries=100)
 
 
 def history_of(lesson):
@@ -62,7 +69,7 @@ async def test_opening_a_lesson_without_history_commits_its_current_files(tmp_pa
     async with open_lesson(lesson, [[AssistantText("Oi.")]]):
         (first,) = history_of(lesson)
 
-    assert first.message == "Primeira versão da aula"
+    assert subject(first) == "Primeira versão da aula"
     assert files_in(first) == {"cenas.py": "COR = AZUL\n", "CONTEXTO.md": "# Contexto\n"}
 
 
@@ -80,7 +87,7 @@ async def test_an_agent_turn_that_changes_a_file_makes_exactly_one_commit(tmp_pa
         await send(user, "muda a cor da luz", last="Pronto.")
         latest, first = history_of(tmp_path)
 
-    assert latest.message == "Pedido: muda a cor da luz"
+    assert subject(latest) == "Pedido: muda a cor da luz"
     assert latest.parents == [first]
     assert files_in(latest) == {"cenas.py": "COR_LUZ = AMARELO\n", "CONTEXTO.md": "A luz é amarela.\n"}
 
@@ -91,7 +98,7 @@ async def test_a_turn_that_changes_no_file_makes_no_commit(tmp_path):
     async with open_lesson(tmp_path, scenario) as user:
         await send(user, "a luz é branca?", last="A luz já é branca.")
 
-        assert [commit.message for commit in history_of(tmp_path)] == ["Primeira versão da aula"]
+        assert [subject(commit) for commit in history_of(tmp_path)] == ["Primeira versão da aula"]
 
 
 async def test_reopening_a_lesson_keeps_its_history(tmp_path):
@@ -100,7 +107,7 @@ async def test_reopening_a_lesson_keeps_its_history(tmp_path):
         await send(user, "luz azul", last="Feito.")
 
     async with open_lesson(tmp_path):
-        assert [commit.message for commit in history_of(tmp_path)] == ["Pedido: luz azul", "Primeira versão da aula"]
+        assert [subject(commit) for commit in history_of(tmp_path)] == ["Pedido: luz azul", "Primeira versão da aula"]
 
 
 async def test_render_outputs_and_caches_are_not_versioned(tmp_path):
@@ -139,7 +146,7 @@ async def test_it_works_in_folders_with_spaces_and_accents(tmp_path):
         latest, first = history_of(lesson)
 
     assert files_in(first) == {"anotações.md": "Contração\n"}
-    assert latest.message == "Pedido: anota a contração"
+    assert subject(latest) == "Pedido: anota a contração"
     assert files_in(latest) == {"anotações.md": "Contração do comprimento\n"}
 
 
@@ -166,9 +173,9 @@ async def test_edits_made_outside_manimflow_are_committed_apart_from_the_agents_
         await send(user, "luz verde", last="Verde.")
         agent, outside, first = history_of(tmp_path)
 
-    assert outside.message == "Edições feitas fora do ManimFlow"
+    assert subject(outside) == "Edições feitas fora do ManimFlow"
     assert files_in(outside) == {"fisica.py": "g = 9.81\n", "cenas.py": "COR = AZUL\n"}
-    assert agent.message == "Pedido: luz verde"
+    assert subject(agent) == "Pedido: luz verde"
     assert files_in(agent) == {"fisica.py": "g = 9.81\n", "cenas.py": "COR = VERDE\n"}
 
 
@@ -189,7 +196,7 @@ async def test_a_failed_commit_is_reported_and_the_chat_recovers(tmp_path):
         await send(user, "luz amarela", last="Amarelo.")
         latest, *_ = history_of(tmp_path)
 
-    assert latest.message == "Pedido: luz amarela"
+    assert subject(latest) == "Pedido: luz amarela"
     assert files_in(latest) == {"cenas.py": "COR = AMARELO\n"}
 
 
@@ -209,9 +216,9 @@ async def test_the_next_message_carries_the_teachers_edits_since_the_agents_last
         await send(user, "confira", last="Vi.")
 
     first, second = agent.received
-    assert first.attachments == {}
+    assert attached(first) == {}
     # The agent's own change to cenas.py is not in it.
-    assert second.attachments == {
+    assert attached(second) == {
         "edicoes-manuais.diff": "diff --git a/fisica.py b/fisica.py\n"
         "index 8ae8599..b21e809 100644\n"
         "--- a/fisica.py\n"
@@ -240,8 +247,8 @@ async def test_a_turn_that_changes_nothing_still_takes_the_edits_with_it(tmp_pat
         await send(user, "agora a cor", last="Pronto.")
 
     first, second = agent.received
-    assert first.attachments
-    assert second.attachments == {}
+    assert attached(first)
+    assert attached(second) == {}
 
 
 async def test_a_deleted_file_leaves_the_next_version(tmp_path):
@@ -253,3 +260,16 @@ async def test_a_deleted_file_leaves_the_next_version(tmp_path):
         latest, _ = history_of(tmp_path)
 
     assert files_in(latest) == {"fisica.py": "g = 9.8\n"}
+
+
+def test_each_agent_turns_version_is_found_by_the_turns_id(tmp_path):
+    history = History.open(tmp_path)
+    (tmp_path / "cenas.py").write_text("x = 1\n", encoding="utf-8")
+    saved = history.commit_agent_turn("luz amarela", "turno-7")
+    history.commit_agent_turn("nada mudou", "turno-8")
+
+    versions = history.turn_versions()
+
+    assert list(versions) == ["turno-7"]
+    assert versions["turno-7"].id == saved
+    assert versions["turno-7"].message == "Pedido: luz amarela"
