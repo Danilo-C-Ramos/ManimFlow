@@ -464,6 +464,9 @@ async def test_restaurar_exemplo_brings_the_original_back_and_starts_its_convers
     example = library.example()
     assert agent.archived == [example]
     assert (example / "cenas.py").read_text(encoding="utf-8") == (EXAMPLE / "cenas.py").read_text(encoding="utf-8")
+    # A new version, so the teacher's changes stay in the example's history.
+    assert history(example)[:2] == ["Exemplo restaurado", "Pedido: muda tudo"]
+    assert status(example) == Status.READY
 
 
 async def test_signed_out_the_sidebar_and_the_settings_offer_to_sign_in(library):

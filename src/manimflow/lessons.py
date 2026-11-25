@@ -55,6 +55,7 @@ _EXAMPLES = _PACKAGE / "exemplos"
 # The example comes with a preview of every scene, so it shows its animations at once.
 _PREVIEWS = Path(OUTPUT_DIR) / "previa"
 EXAMPLE_NAME = "Relatividade - herói e espelho"
+EXAMPLE_RESTORED = "Exemplo restaurado"
 # The bundled example's profile is also every teacher's first one.
 _DEFAULT_PROFILE = _EXAMPLES / PROFILE_FILE
 
@@ -298,10 +299,28 @@ class Library:
         return example
 
     def reset_example(self) -> Path:
-        """Brings the example's copy back to the bundled original, dropping the teacher's
-        changes and their history."""
-        self._copy_example()
-        return self.example()
+        """Brings the example's copy back to the bundled original, as a new version: the
+        teacher's changes stay in its history.
+
+        In place, inside the folder: on Windows, the folder and its history are held open
+        while the app shows the example, so they can be neither removed nor replaced.
+        """
+        example = self.example()
+        bundled = _EXAMPLES / "relatividade"
+        for path in example.iterdir():
+            if path.name == ".git":
+                continue
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+        shutil.copytree(bundled, example, dirs_exist_ok=True)
+        shutil.copy(_DEFAULT_PROFILE, example.parent / PROFILE_FILE)
+        history = History.open(example)
+        history.commit_manual_edit(EXAMPLE_RESTORED)
+        # Its plan was agreed long ago, as in a fresh copy.
+        history.approve_plan()
+        return example
 
     def _copy_example(self) -> None:
         examples = self.data / "exemplo"

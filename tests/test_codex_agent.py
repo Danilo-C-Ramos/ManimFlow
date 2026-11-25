@@ -193,7 +193,8 @@ async def test_the_lessons_history_holds_every_turn_as_the_chat_showed_it(codex_
         FileChanged("notas.md", "added"),
         AssistantText("Pronto."),
     ]
-    assert started.reads == ("plano.yaml",)
+    if sys.platform != "win32":
+        assert started.reads == ("plano.yaml",)
     assert second.events == [AssistantText("Fonte maior.")]
     # One conversation: the second turn continued the first one's thread.
     assert first.session == second.session
@@ -201,6 +202,9 @@ async def test_the_lessons_history_holds_every_turn_as_the_chat_showed_it(codex_
     assert first.started_at is not None and first.started_at.tzinfo is not None
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="Codex names the files a command reads only for POSIX shells, not PowerShell"
+)
 async def test_a_command_that_only_reads_names_the_files(codex_agent, mock_model, lesson):
     mock_model.reply(command("c1", "cat plano.yaml; cat cenas.py"))
 

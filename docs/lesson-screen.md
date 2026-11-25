@@ -4,7 +4,7 @@ A lesson opens as a chat on the left and a workspace on the right, as in the "Ch
 
 ## Header
 
-The turma (a link to its page) and the lesson's name, its status pill (see [lessons](lessons.md#status)), "Mostrar prévia" while the workspace is closed, and "Exportar", which opens the export dialog. On the example, "Restaurar exemplo" brings the original back, after a confirmation: its files and its conversation start over ([lessons](lessons.md#the-example)). Without the sidebar (in the tests), the settings gear sits here too.
+The turma (a link to its page) and the lesson's name, its status pill (see [lessons](lessons.md#status)), "Mostrar prévia" while the workspace is closed, and "Exportar", which opens the export dialog. On the example, "Restaurar exemplo" brings the original back, after a confirmation: its files come back as a new version and its conversation starts over ([lessons](lessons.md#the-example)). Without the sidebar (in the tests), the settings gear sits here too.
 
 ## Chat and workspace
 

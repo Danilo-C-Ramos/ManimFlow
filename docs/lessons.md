@@ -90,7 +90,7 @@ The bundled example (`src/manimflow/exemplos/relatividade`) is never opened in p
 
 The example comes with a preview of every scene (`saida/previa/`, about 1.4 MB), so it shows its images and videos at once, before LaTeX is even installed. A copy made before the previews came with the example gets the ones it lacks when it opens; a render of the teacher's own is newer, and the preview shows the newest.
 
-Its chat is for exploring and changing the example: the app introduces it, and each message tells the agent that this is the bundled example ([the lesson screen](lesson-screen.md#the-conversation)). "Restaurar exemplo" in its header copies the original over the teacher's copy, with a new history, and puts its conversation away.
+Its chat is for exploring and changing the example: the app introduces it, and each message tells the agent that this is the bundled example ([the lesson screen](lesson-screen.md#the-conversation)). "Restaurar exemplo" in its header brings the original back over the teacher's copy, inside the folder (on Windows the open example's folder and history can't be removed or replaced), as the version "Exemplo restaurado", so the teacher's changes stay in its history; its conversation is put away.
 
 ## Addresses
 

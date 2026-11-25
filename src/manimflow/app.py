@@ -365,8 +365,8 @@ class ExampleReset:
         with ui.dialog() as self.dialog, ui.card().classes("w-[28rem] items-stretch gap-3"):
             ui.label("Restaurar o exemplo original?").classes("text-lg")
             ui.label(
-                "As mudanças que você fez no exemplo e a conversa sobre ele são apagadas, "
-                "e o exemplo volta a ser como veio no ManimFlow."
+                "O exemplo volta a ser como veio no ManimFlow, e a conversa sobre ele recomeça. "
+                "As suas mudanças continuam no histórico de versões."
             ).classes("mf-muted")
             with ui.row().classes("justify-end"):
                 ui.button("Cancelar", on_click=self.dialog.close).props("flat")
