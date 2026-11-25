@@ -137,7 +137,8 @@ def _module(module: str, distribution: str, label: str) -> Check:
         return Check(
             label,
             False,
-            f"{label} não carrega ({error}). Reinstale o ManimFlow com "
+            f"{label} não carrega ({error}). Reinstale o ManimFlow: na pasta dele, rode "
+            "`uv sync --reinstall`; se ele foi instalado com `uv tool`, rode "
             "`uv tool install --reinstall manimflow`.",
         )
     version = importlib.metadata.version(distribution)

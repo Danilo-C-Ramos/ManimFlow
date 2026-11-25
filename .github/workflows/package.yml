@@ -1,6 +1,7 @@
 name: Package
 
-# Builds the package and runs it on a clean Windows runner the way a teacher would.
+# Builds the package and runs it on a clean Windows runner the way a teacher would: from
+# the wheel, and from a ZIP of the repository, as the README says.
 # CI calls this on every push and the release workflow publishes what it builds.
 on: workflow_call
 
@@ -21,6 +22,15 @@ jobs:
         with:
           name: dist
           path: dist/
+
+      # What GitHub's "Download ZIP" gives: the files without git.
+      - name: Zip the source
+        run: git archive --format=zip --prefix=ManimFlow-main/ -o ManimFlow-main.zip HEAD
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: source
+          path: ManimFlow-main.zip
 
   # No checkout and no `uv sync`: only uv and the built wheel, as on a teacher's computer.
   try-on-windows:
@@ -52,3 +62,46 @@ jobs:
 
       - name: uvx manimflow doctor
         run: uvx --from dist/*.whl manimflow doctor
+
+  # The README's way: uv from its installer, then `uv run` in the repository's ZIP, unzipped
+  # into a folder with spaces and accents. Then the app itself runs, in Edge.
+  try-from-source-on-windows:
+    needs: build
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: source
+
+      - name: Unzip into Downloads\Aulas de Física
+        run: |
+          $folder = Join-Path $HOME "Downloads\Aulas de Física"
+          Expand-Archive ManimFlow-main.zip -DestinationPath $folder
+          "MANIMFLOW=$(Join-Path $folder 'ManimFlow-main')" >> $env:GITHUB_ENV
+
+      - name: Install uv
+        run: |
+          powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+          "$HOME\.local\bin" >> $env:GITHUB_PATH
+
+      - name: uv run manimflow doctor --install
+        working-directory: ${{ env.MANIMFLOW }}
+        run: uv run manimflow doctor --install
+
+      - name: uv run manimflow doctor
+        working-directory: ${{ env.MANIMFLOW }}
+        run: uv run manimflow doctor
+
+      # Renders the example's previews, talks to the demo agent, and opens Codex's sign-in.
+      - name: Go through the app in Edge
+        working-directory: ${{ env.MANIMFLOW }}
+        run: uv run --no-project --with playwright==1.64.1 python .github/try_the_app.py "$env:RUNNER_TEMP\telas" uv run manimflow
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: telas-windows
+          path: ${{ runner.temp }}/telas
