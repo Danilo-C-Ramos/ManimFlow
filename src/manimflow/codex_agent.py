@@ -1,9 +1,10 @@
 """The `Agent` interface on top of Codex, through the official `openai-codex` SDK.
 
 The SDK starts the bundled Codex app-server once and keeps it for the app's
-lifetime. Every session is a new Codex thread rooted in the lesson folder, with
-the ManimFlow base instructions and skill, a sandbox that only writes inside
-the lesson, no network and no approval prompts.
+lifetime. A lesson's conversation is a Codex thread rooted in the lesson folder,
+with the ManimFlow base instructions and skill, a sandbox that only writes inside
+the lesson, no network and no approval prompts. Every message continues the
+lesson's newest thread (see docs/adr/0005-a-lesson-has-one-conversation.md).
 """
 
 import asyncio
@@ -29,10 +30,12 @@ from openai_codex import (
     SkillInput,
     TextInput,
 )
+from openai_codex.api import AsyncTurnHandle
 from openai_codex.async_client import AsyncCodexClient
 from openai_codex.generated.v2_all import (
     AddPatchChangeKind,
     AgentMessageThreadItem,
+    ContextCompactionThreadItem,
     ApiKeyAccount,
     ChatgptAccount,
     CodexErrorInfoValue,
@@ -46,15 +49,20 @@ from openai_codex.generated.v2_all import (
     ImageViewThreadItem,
     ItemCompletedNotification,
     ItemStartedNotification,
+    ListFilesCommandAction,
     PatchApplyStatus,
     RateLimitWindow,
+    ReadCommandAction,
     ReasoningEffort,
+    ReasoningThreadItem,
+    SearchCommandAction,
     SortDirection,
     TextUserInput,
     ThreadListCwdFilter,
     ThreadSortKey,
     Turn,
     TurnCompletedNotification,
+    TurnPlanUpdatedNotification,
     TurnStatus,
     UserMessageThreadItem,
     WindowsSandboxReadiness,
@@ -72,17 +80,19 @@ from manimflow.agent import (
     Account,
     AgentError,
     AssistantText,
+    Checklist,
+    ChecklistStep,
     CommandFinished,
     CommandStarted,
     Event,
     FileChanged,
     ImageViewed,
     LoginFailed,
-    Message,
     ModelOption,
     ModelSettings,
-    PastSession,
+    PastTurn,
     QuotaWindow,
+    Working,
     teachers_words,
     with_attachments,
 )
@@ -189,19 +199,71 @@ class CodexAgent:
         assert self._sandbox is not None, "an agent started without sessions has no sandbox"
         return await self._sandbox
 
-    async def start_session(self, lesson: Path) -> "CodexSession":
+    async def session(self, lesson: Path) -> "CodexSession":
+        """Continues the lesson's newest thread in which the teacher wrote; the first
+        message starts one when the lesson has none."""
+        threads = await self._threads(lesson)
+        return CodexSession(lesson, self, threads[0] if threads else None)
+
+    async def _thread(self, lesson: Path, thread_id: str | None) -> AsyncThread:
+        """The thread `thread_id`, resumed, or a new one when None; each with this
+        ManimFlow's instructions and sandbox."""
         codex = await self._client()
         # A thread takes the sandbox config at its start; until setup ends, Codex
         # blocks every command in it.
         await self.sandbox_problem()
-        thread = await codex.thread_start(
-            cwd=str(lesson.absolute()),
+        cwd = str(lesson.absolute())
+        if thread_id is None:
+            return await codex.thread_start(
+                cwd=cwd,
+                sandbox=Sandbox.workspace_write,
+                approval_mode=ApprovalMode.deny_all,
+                developer_instructions=BASE_INSTRUCTIONS,
+                config=THREAD_CONFIG,
+            )
+        # The instructions are given again, so an upgraded ManimFlow brings its own.
+        return await codex.thread_resume(
+            thread_id,
+            cwd=cwd,
             sandbox=Sandbox.workspace_write,
             approval_mode=ApprovalMode.deny_all,
             developer_instructions=BASE_INSTRUCTIONS,
             config=THREAD_CONFIG,
         )
-        return CodexSession(lesson, thread, self)
+
+    async def _threads(self, lesson: Path) -> list[str]:
+        """The lesson's threads, found by the folder they started in, in which the
+        teacher wrote; newest first."""
+        codex = await self._client()
+        threads: list[str] = []
+        cursor: str | None = None
+        while True:
+            page = await codex.thread_list(
+                cwd=ThreadListCwdFilter(str(lesson.absolute())),
+                cursor=cursor,
+                sort_key=ThreadSortKey.created_at,
+                sort_direction=SortDirection.desc,
+            )
+            # A thread's preview is its first message; a thread without one never got a request.
+            threads += [thread.id for thread in page.data if thread.preview]
+            if page.next_cursor is None:
+                return threads
+            cursor = page.next_cursor
+
+    async def lesson_history(self, lesson: Path) -> list[PastTurn]:
+        codex = await self._client()
+        turns: list[PastTurn] = []
+        for thread in reversed(await self._threads(lesson)):
+            read = (await AsyncThread(codex, thread).read(include_turns=True)).thread
+            turns += [_past_turn(thread, turn, lesson) for turn in read.turns]
+        return turns
+
+    async def archive(self, lesson: Path) -> None:
+        """Puts away the lesson's threads, so its conversation starts over; used when the
+        lesson's files start over, as the example's do."""
+        codex = await self._client()
+        for thread in await self._threads(lesson):
+            await codex.thread_archive(thread)
 
     async def models(self) -> list[ModelOption]:
         codex = await self._client()
@@ -224,42 +286,6 @@ class CodexAgent:
         """
         account = await self.account()
         return presets(choose_model(account.plan, await self.models()))
-
-    async def past_sessions(self, lesson: Path) -> list[PastSession]:
-        """The lesson's threads, found by the folder they started in, newest first."""
-        codex = await self._client()
-        sessions: list[PastSession] = []
-        cursor: str | None = None
-        while True:
-            page = await codex.thread_list(
-                cwd=ThreadListCwdFilter(str(lesson.absolute())),
-                cursor=cursor,
-                sort_key=ThreadSortKey.created_at,
-                sort_direction=SortDirection.desc,
-            )
-            # A thread's preview is its first message; a thread without one never got a request.
-            sessions += [
-                PastSession(thread.id, datetime.fromtimestamp(thread.created_at, UTC), teachers_words(thread.preview))
-                for thread in page.data
-                if thread.preview
-            ]
-            if page.next_cursor is None:
-                return sessions
-            cursor = page.next_cursor
-
-    async def session_messages(self, session_id: str) -> list[Message]:
-        codex = await self._client()
-        thread = (await AsyncThread(codex, session_id).read(include_turns=True)).thread
-        messages: list[Message] = []
-        for past_turn in thread.turns:
-            for item in past_turn.items:
-                match item.root:
-                    case UserMessageThreadItem(content=content):
-                        text = "\n\n".join(part.root.text for part in content if isinstance(part.root, TextUserInput))
-                        messages.append(Message("teacher", teachers_words(text)))
-                    case AgentMessageThreadItem(text=text):
-                        messages.append(Message("agent", text))
-        return messages
 
     async def model_settings(self) -> ModelSettings:
         while True:
@@ -408,30 +434,101 @@ def _windows_read_grants_running() -> bool:
 
 
 class CodexSession:
-    def __init__(self, lesson: Path, thread: AsyncThread, agent: CodexAgent) -> None:
-        self.id = thread.id
+    def __init__(self, lesson: Path, agent: CodexAgent, thread_id: str | None) -> None:
         self.lesson = lesson
-        self._thread = thread
         self._agent = agent
-        self._started = False
+        # None until the first message starts the lesson's first thread.
+        self._thread_id = thread_id
+        self._thread: AsyncThread | None = None
+        # A thread that already ran turns has the skill in its history.
+        self._has_skill = thread_id is not None
+        self._turn: AsyncTurnHandle | None = None
+        self._last_turn: str | None = None
+        # "Parar" may come before the turn exists, while the thread starts or resumes.
+        self._stopping = False
 
-    async def send(self, text: str, attachments: Sequence[Path] = ()) -> AsyncIterator[Event]:
+    @property
+    def last_turn(self) -> str | None:
+        return self._last_turn
+
+    async def send(
+        self, text: str, attachments: Sequence[Path] = (), output_schema: dict | None = None
+    ) -> AsyncIterator[Event]:
         # Every command would fail inside a sandbox that can't start, so the turn
         # would only spend quota.
+        self._last_turn = None
+        self._stopping = False
         if problem := await self._agent.sandbox_problem():
             yield AgentError(problem, delivered=False)
             return
         settings = await self._agent.model_settings()
+        if self._thread is None:
+            self._thread = await self._agent._thread(self.lesson, self._thread_id)
+            self._thread_id = self._thread.id
         message: list[InputItem] = [TextInput(with_attachments(text, attachments))]
-        if not self._started:
+        if not self._has_skill:
             # Codex puts the skill's text into the thread itself, so the agent has it
             # without reading the file, and later turns keep it in the history.
             message.insert(0, SkillInput(SKILL_NAME, str(self._agent.skill)))
-            self._started = True
-        handle = await self._thread.turn(message, model=settings.model, effort=ReasoningEffort(settings.effort))
-        async for notification in handle.stream():
-            for event in _events(notification, self.lesson):
-                yield event
+        if self._stopping:
+            yield AgentError(_INTERRUPTED, delivered=False)
+            return
+        handle = await self._thread.turn(
+            message, model=settings.model, effort=ReasoningEffort(settings.effort), output_schema=output_schema
+        )
+        self._has_skill = True
+        self._turn = handle
+        self._last_turn = handle.id
+        try:
+            if self._stopping:
+                await self.stop()
+            async for notification in handle.stream():
+                for event in _events(notification, self.lesson):
+                    if isinstance(event, AgentError) and event.message == _TOO_LONG:
+                        # Codex couldn't shrink the conversation; the next message starts
+                        # a new thread, and CONTEXTO.md carries the lesson over.
+                        self._thread = self._thread_id = None
+                        self._has_skill = False
+                    yield event
+        finally:
+            self._turn = None
+
+    async def stop(self) -> None:
+        self._stopping = True
+        if self._turn is not None:
+            try:
+                await self._turn.interrupt()
+            except Exception:
+                # The turn may have just ended; it reports how it ends either way.
+                logger.warning("Codex couldn't interrupt the turn", exc_info=True)
+
+
+def _past_turn(thread: str, turn: Turn, lesson: Path) -> PastTurn:
+    """A turn of an earlier conversation, with the events the chat showed when it ran."""
+    request = ""
+    events: list[Event] = []
+    for item in turn.items:
+        match item.root:
+            case UserMessageThreadItem(content=content):
+                text = "\n\n".join(part.root.text for part in content if isinstance(part.root, TextUserInput))
+                request = teachers_words(text)
+            case AgentMessageThreadItem(text=text):
+                events.append(AssistantText(text))
+            case CommandExecutionThreadItem() as run:
+                started = _command_started(run, lesson)
+                exit_code = run.exit_code if run.exit_code is not None else -1
+                events += [started, CommandFinished(run.id, started.command, exit_code)]
+            case FileChangeThreadItem(status=PatchApplyStatus.completed, changes=changes):
+                events += [_file_changed(change, lesson) for change in changes]
+            case ImageViewThreadItem(path=path):
+                events.append(ImageViewed(_shown(path.root, lesson)))
+    if turn.status not in (TurnStatus.completed, TurnStatus.in_progress):
+        events.append(_turn_failed(turn))
+    started_at = datetime.fromtimestamp(turn.started_at, UTC) if turn.started_at is not None else None
+    seconds = turn.duration_ms / 1000 if turn.duration_ms is not None else None
+    if seconds is None and turn.started_at is not None and turn.completed_at is not None:
+        seconds = turn.completed_at - turn.started_at
+    return PastTurn(turn.id, thread, started_at, request, events, seconds)
 
 
 def _events(notification: Notification, lesson: Path) -> list[Event]:
@@ -440,7 +537,13 @@ def _events(notification: Notification, lesson: Path) -> list[Event]:
         case ItemStartedNotification(item=item):
             match item.root:
                 case CommandExecutionThreadItem() as run:
-                    return [CommandStarted(run.id, _command(run))]
+                    return [_command_started(run, lesson)]
+                case ReasoningThreadItem():
+                    return [Working("Pensando")]
+                case AgentMessageThreadItem():
+                    return [Working("Escrevendo a resposta")]
+                case ContextCompactionThreadItem():
+                    return [Working("Resumindo a conversa para continuar")]
         case ItemCompletedNotification(item=item):
             match item.root:
                 case AgentMessageThreadItem(text=text):
@@ -453,9 +556,22 @@ def _events(notification: Notification, lesson: Path) -> list[Event]:
                     return [_file_changed(change, lesson) for change in changes]
                 case ImageViewThreadItem(path=path):
                     return [ImageViewed(_shown(path.root, lesson))]
+        case TurnPlanUpdatedNotification(plan=plan):
+            return [Checklist(tuple(ChecklistStep(step.step, step.status.value) for step in plan))]
         case TurnCompletedNotification(turn=turn) if turn.status != TurnStatus.completed:
             return [_turn_failed(turn)]
     return []
+
+
+def _command_started(run: CommandExecutionThreadItem, lesson: Path) -> CommandStarted:
+    """The command, with the files it only reads when Codex could tell."""
+    actions = [action.root for action in run.command_actions]
+    reads: tuple[str, ...] = ()
+    if actions and all(isinstance(action, ReadCommandAction) for action in actions):
+        reads = tuple(_shown(action.path.root, lesson) for action in actions if isinstance(action, ReadCommandAction))
+    elif actions and all(isinstance(action, (ListFilesCommandAction, SearchCommandAction)) for action in actions):
+        reads = (".",)
+    return CommandStarted(run.id, _command(run), reads)
 
 
 def _command(run: CommandExecutionThreadItem) -> str:
@@ -487,14 +603,17 @@ _LOGIN_REFUSED = "O Codex recusou o seu login. Entre de novo com o ChatGPT ou co
 _TOO_MANY_REQUESTS = "O serviço recebeu pedidos demais. Espere um minuto e tente de novo."
 _SERVICE_UNSTABLE = "O serviço da OpenAI está instável agora. Tente de novo em alguns minutos."
 _UNEXPECTED = "O agente parou por um erro inesperado."
+_INTERRUPTED = "A resposta foi interrompida antes de terminar."
+_TOO_LONG = (
+    "A conversa ficou longa demais para o agente. Mande o pedido de novo: ele continua numa "
+    "conversa nova, com o que está registrado no CONTEXTO.md."
+)
 
 _EXPLANATIONS = {
     CodexErrorInfoValue.usage_limit_exceeded: "Você atingiu o limite de uso do seu plano. Tente de novo mais tarde.",
     CodexErrorInfoValue.rate_limit_exceeded: _TOO_MANY_REQUESTS,
     CodexErrorInfoValue.unauthorized: _LOGIN_REFUSED,
-    CodexErrorInfoValue.context_window_exceeded: (
-        "A conversa ficou longa demais. Recarregue a página para começar uma sessão nova."
-    ),
+    CodexErrorInfoValue.context_window_exceeded: _TOO_LONG,
     CodexErrorInfoValue.internal_server_error: _SERVICE_UNSTABLE,
     CodexErrorInfoValue.server_overloaded: _SERVICE_UNSTABLE,
     # Such as a model picked in "Avançado" that the plan doesn't include.
@@ -507,7 +626,7 @@ _EXPLANATIONS = {
 def _turn_failed(turn: Turn) -> AgentError:
     """Explains a failed or interrupted turn to the teacher; Codex's own message is in English."""
     if turn.status == TurnStatus.interrupted:
-        return AgentError("A resposta foi interrompida antes de terminar.")
+        return AgentError(_INTERRUPTED)
     error = turn.error
     logger.warning("Codex turn failed: %s", error.message if error else turn.status)
     info = error.codex_error_info.root if error and error.codex_error_info else None

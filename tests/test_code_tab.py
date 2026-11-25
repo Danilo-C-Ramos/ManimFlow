@@ -9,8 +9,14 @@ from nicegui.testing.user_simulation import user_simulation
 from manimflow.agent import AgentError, AssistantText
 from manimflow.app import lesson_page
 from manimflow.fake_agent import EditFile, ScriptedAgent
+from manimflow.versioning import History
 
-from conftest import FIXTURES
+from conftest import FIXTURES, attached
+
+
+def subject(commit):
+    """The commit's message without the turn id that ends an agent turn's version."""
+    return commit.message.partition("\n\nTurno: ")[0]
 
 
 @asynccontextmanager
@@ -27,6 +33,8 @@ def minimal_lesson(tmp_path):
     shutil.copytree(FIXTURES / "aula_minima", lesson)
     # LF on every platform, as the agent writes it.
     (lesson / "fisica.py").write_text("VELOCIDADE = 1.0\n", encoding="utf-8", newline="\n")
+    # A lesson in production: its plan was approved, so messages aren't plan turns.
+    History.open(lesson).approve_plan()
     return lesson
 
 
@@ -65,7 +73,7 @@ async def test_renderizar_saves_the_edit_and_commits_it_as_a_manual_edit(tmp_pat
         await user.should_see("Prévia atualizada.", retries=600)
         assert (lesson / "fisica.py").read_text(encoding="utf-8") == "VELOCIDADE = 1.0\nACELERACAO = 9.8\n"
         newest = history_of(lesson)[0]
-        assert newest.message == "Edição manual em fisica.py"
+        assert subject(newest) == "Edição manual em fisica.py"
         assert newest.tree["fisica.py"].data == b"VELOCIDADE = 1.0\nACELERACAO = 9.8\n"
 
 
@@ -88,7 +96,7 @@ async def send(user, text, last):
     user.find(marker="send").click()
     # Each turn commits a version, which takes seconds on Windows.
     await user.should_see(last, retries=100)
-    await user.should_not_see("O agente está trabalhando…", retries=100)
+    await user.should_not_see(marker="progress", retries=100)
 
 
 async def test_the_next_message_carries_the_manual_edit_diff_only_once(tmp_path):
@@ -105,11 +113,11 @@ async def test_the_next_message_carries_the_manual_edit_diff_only_once(tmp_path)
 
         first, second = agent.received
         assert first.text == "use a minha aceleração"
-        (diff,) = first.attachments.values()
+        (diff,) = attached(first).values()
         assert "+ACELERACAO = 9.8" in diff
         assert "a/fisica.py" in diff
         assert second.text == "agora deixe azul"
-        assert second.attachments == {}
+        assert attached(second) == {}
 
 
 def status(user):
@@ -129,7 +137,7 @@ async def test_a_scene_that_fails_to_render_is_reported_in_portuguese(tmp_path):
 
         await user.should_see("A cena S0 não renderizou:", retries=600)
         assert status(user) == ["A cena S0 não renderizou:", "ValueError: sinal trocado"]
-        assert history_of(lesson)[0].message == "Edição manual em cenas.py"
+        assert subject(history_of(lesson)[0]) == "Edição manual em cenas.py"
 
 
 async def eventually(check, seconds=3.0):
@@ -196,7 +204,7 @@ async def test_renderizar_waits_for_the_agent_to_finish_its_turn(tmp_path):
         assert not render_enabled(user)
 
         await user.should_see("Terminei.", retries=20)
-        await user.should_not_see("O agente está trabalhando…")
+        await user.should_not_see(marker="progress")
         assert render_enabled(user)
 
 
@@ -286,7 +294,7 @@ async def test_the_diff_goes_again_when_the_agent_never_got_the_message(tmp_path
         await send(user, "tente de novo", "Vi a sua correção.")
 
         _, retry = agent.received
-        (diff,) = retry.attachments.values()
+        (diff,) = attached(retry).values()
         assert "+VELOCIDADE = 5.0" in diff
 
 

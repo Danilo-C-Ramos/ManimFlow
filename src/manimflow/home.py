@@ -45,14 +45,17 @@ def app_root(agent: Agent, library: Library) -> Callable[[Request], Awaitable[No
     Not ui.sub_pages: the lesson screen has a header, which NiceGUI only allows at
     the top of a page.
     """
-    example = library.example()
+    # Ready before the first page asks for it.
+    library.example()
 
     async def page(request: Request) -> None:
         apply_theme()
         path = request.url.path
         opening = Opening(tab=request.query_params.get("aba"), export="exportar" in request.query_params)
         if path == EXAMPLE_ROUTE:
-            await lesson_page(agent, example, _sidebar(library, agent, Here(example=True)), opening)()
+            here = Here(example=True)
+            example = library.example()
+            await lesson_page(agent, example, _sidebar(library, agent, here), opening, reset_example=library.reset_example)()
         elif path.startswith(LESSON_ROUTE):
             lesson = library.lesson(path.removeprefix(LESSON_ROUTE))
             if lesson is None:

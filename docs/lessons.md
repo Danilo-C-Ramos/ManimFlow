@@ -80,13 +80,17 @@ From top to bottom:
 - **Precisa de você**: lessons whose plan waits for approval, lessons the agent is working on, and exports finished in this session that the teacher hasn't opened. A click opens the lesson on the right tab, or the export's folder.
 - **Turmas**, as a tree: each turma with its color and number of lessons, and its lessons with a status dot. The open lesson's turma starts unfolded. On hover, a turma offers "+" (new lesson in it), "✎" (its instructions) and "⋯" (change the color, open the folder); a lesson offers "▶" (the preview), "⇩" (the export dialog) and "⋯" (open the folder).
 - **Sem turma**, when there are lessons without a turma, and **Exemplo**.
-- The ChatGPT plan's usage, which opens the settings, and "Perfil do professor".
+- The ChatGPT plan's usage, which opens the settings, and "Perfil do professor". When nobody is signed in, "Entrar com o ChatGPT" takes the usage's place, and the settings offer both ways to sign in instead of the account.
 
 The sidebar looks at the lessons folder every two seconds, so it follows what the agent does in another tab.
 
 ## The example
 
-The bundled example (`src/manimflow/exemplos/relatividade`) is never opened in place. The first time it is needed, it is copied, with its own profile, to `exemplo/` in ManimFlow's own folder, and "Abrir o exemplo" or "Herói e espelho" in the sidebar opens that copy. The teacher can change the copy freely, and it is kept across launches with its version history and past sessions, like any lesson. The copy is outside the lessons folder, so it never shows among the teacher's lessons, and outside the temp folder, where Codex's Windows sandbox doesn't let the agent in (ADR 0003).
+The bundled example (`src/manimflow/exemplos/relatividade`) is never opened in place. The first time it is needed, it is copied, with its own profile, to `exemplo/` in ManimFlow's own folder, and "Abrir o exemplo" or "Herói e espelho" in the sidebar opens that copy. The teacher can change the copy freely, and it is kept across launches with its version history and its conversation, like any lesson. The copy is outside the lessons folder, so it never shows among the teacher's lessons, and outside the temp folder, where Codex's Windows sandbox doesn't let the agent in (ADR 0003).
+
+The example comes with a preview of every scene (`saida/previa/`, about 1.4 MB), so it shows its images and videos at once, before LaTeX is even installed. A copy made before the previews came with the example gets the ones it lacks when it opens; a render of the teacher's own is newer, and the preview shows the newest.
+
+Its chat is for exploring and changing the example: the app introduces it, and each message tells the agent that this is the bundled example ([the lesson screen](lesson-screen.md#the-conversation)). "Restaurar exemplo" in its header copies the original over the teacher's copy, with a new history, and puts its conversation away.
 
 ## Addresses
 

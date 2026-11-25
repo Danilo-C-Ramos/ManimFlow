@@ -249,12 +249,23 @@ class Sidebar:
 
     async def _show_usage(self) -> None:
         try:
-            quota = await self.agent.quota()
+            signed_in = (await self.agent.account()).logged_in
+            quota = await self.agent.quota() if signed_in else None
         except Exception:
-            # Signed out, or the engine is still starting: the card only shows a known usage.
+            # The engine is still starting: the card only shows a known usage.
             logger.debug("Reading the plan's usage failed", exc_info=True)
             return
-        if not quota or self.usage.is_deleted:
+        if self.usage.is_deleted:
+            return
+        if not signed_in:
+            with self.usage:
+                with ui.element("div").classes("mf-usage mf-signin").on("click", self.settings.open).mark("sidebar-sign-in"):
+                    with ui.row().classes("items-center no-wrap gap-2"):
+                        ui.icon("login", size="18px", color="primary")
+                        ui.label("Entrar com o ChatGPT").classes("font-medium text-[13px]")
+                    ui.label("Para conversar com o agente.").classes("mf-faint")
+            return
+        if not quota:
             return
         window = max(quota, key=lambda window: window.used_percent)
         with self.usage:

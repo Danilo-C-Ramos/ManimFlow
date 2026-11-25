@@ -9,12 +9,18 @@ from nicegui.testing.user_simulation import user_simulation
 from manimflow.agent import AgentError, AssistantText
 from manimflow.app import lesson_page
 from manimflow.fake_agent import EditFile, ScriptedAgent
-from manimflow.lessons import Library
+from manimflow.lessons import Library, Status, status
 from manimflow.preview import REFRESH_INTERVAL
+from conftest import attached
 
 # Tries of should_see, 0.1 s apart, for what follows an agent turn: each turn
 # commits a version, which takes seconds on Windows.
 TURN = 100
+
+
+def subject(commit):
+    """The commit's message without the turn id that ends an agent turn's version."""
+    return commit.message.partition("\n\nTurno: ")[0]
 
 
 @asynccontextmanager
@@ -450,14 +456,17 @@ async def test_the_comments_of_an_approval_that_failed_stay_in_the_plan(lesson):
         await user.should_see("Erro do agente: Sem conexão.", retries=TURN)
 
         assert "Talvez deslocar mais." in cards(user)
+        await user.should_not_see(marker="progress", retries=TURN)
     # So a reload, or a new launch, still has them for the next approval.
     assert plan(lesson)["estados"][1]["comentarios"] == ["Talvez deslocar mais."]
+    # And the plan waits for the teacher again.
+    assert status(lesson) == Status.PLAN
 
 
 def history_of(lesson):
     """The message of every commit in the lesson's repository, newest first."""
     repo = pygit2.Repository(str(lesson / ".git"))
-    return [commit.message for commit in repo.walk(repo.head.target)]
+    return [subject(commit) for commit in repo.walk(repo.head.target)]
 
 
 async def test_an_approval_commits_the_card_edits_apart_and_sends_the_plan_diff_only_once(lesson):
@@ -470,7 +479,7 @@ async def test_an_approval_commits_the_card_edits_apart_and_sends_the_plan_diff_
     (approval,) = agent.received
     assert "+    titulo: Quadrado na direita" in approval.text
     # The approval holds the plan diff; the manual-edit attachment would hold it again.
-    assert approval.attachments == {}
+    assert set(attached(approval)) == {"plano-aprovado.md"}
     assert history_of(lesson)[:3] == [
         "Comentários do plano atendidos",
         "Pedido: Aprovei o plano",
@@ -488,5 +497,8 @@ async def test_a_message_with_card_edits_not_yet_approved_carries_no_plan_diff(l
         await user.should_see("Pronto.", retries=TURN)
 
     (message,) = agent.received
-    assert message.attachments == {}
+    # The plan waits for its first approval, so the message asks for the plan, with the
+    # plan as the cards left it; no diff of it goes along.
+    assert set(attached(message)) == {"pedido-de-plano.md"}
+    assert "Mais azul." in attached(message)["pedido-de-plano.md"]
     assert history_of(lesson)[:2] == ["Pedido: deixe o fundo branco", "Edição manual em plano.yaml"]

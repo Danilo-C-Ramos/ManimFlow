@@ -22,13 +22,11 @@ from manimflow.agent import (
     FileChanged,
     ImageViewed,
     LoginFailed,
-    Message,
     ModelOption,
     ModelSettings,
-    PastSession,
+    PastTurn,
     QuotaWindow,
-    teachers_words,
-    with_attachments,
+    Working,
 )
 from manimflow.model_presets import QUICK, choose_model, presets
 
@@ -55,10 +53,12 @@ class Produce:
 
 @dataclass(frozen=True)
 class Received:
-    """A message the teacher sent, with each attachment's name and content as sent."""
+    """A message the teacher sent, with each attachment's name and content as sent, and
+    the format its answer was asked in."""
 
     text: str
     attachments: dict[str, str]
+    output_schema: dict | None = None
 
 
 Step = Event | EditFile | Produce | Exception
@@ -98,25 +98,30 @@ class ScriptedAgent:
         self._settings: ModelSettings | None = None
         # The model settings each turn ran with, in order, across sessions.
         self.turn_settings: list[ModelSettings] = []
-        # When each session started; the fake keeps its sessions in memory only.
+        # When each turn started; the fake keeps its conversations in memory only.
         self._clock = clock
-        self._sessions: list[ScriptedSession] = []
-        # Every message sent to any of its sessions, with its attachments, in order.
+        self._sessions: dict[Path, ScriptedSession] = {}
+        # Every message sent to any lesson, with its attachments, in order.
         self.received: list[Received] = []
+        # The lessons whose conversations were put away, in order.
+        self.archived: list[Path] = []
 
-    async def start_session(self, lesson: Path) -> "ScriptedSession":
-        """A new session, which plays the scenario from its first turn."""
-        session = ScriptedSession(
-            str(len(self._sessions) + 1),
-            lesson,
-            iter(self.scenario),
-            self.delay,
-            self._clock(),
-            self._start_turn,
-            self.received,
-        )
-        self._sessions.append(session)
-        return session
+    async def session(self, lesson: Path) -> "ScriptedSession":
+        """The lesson's conversation, which plays the scenario from its first turn."""
+        key = lesson.resolve()
+        if key not in self._sessions:
+            self._sessions[key] = ScriptedSession(
+                lesson, iter(self.scenario), self.delay, self._clock, self._start_turn, self.received
+            )
+        return self._sessions[key]
+
+    async def lesson_history(self, lesson: Path) -> list[PastTurn]:
+        session = self._sessions.get(lesson.resolve())
+        return list(session.turns) if session is not None else []
+
+    async def archive(self, lesson: Path) -> None:
+        self._sessions.pop(lesson.resolve(), None)
+        self.archived.append(lesson)
 
     def _start_turn(self) -> None:
         self.turn_settings.append(self._current())
@@ -126,20 +131,6 @@ class ScriptedAgent:
 
     def _current(self) -> ModelSettings:
         return self._settings or self._presets()[self._preset]
-
-    async def past_sessions(self, lesson: Path) -> list[PastSession]:
-        return [
-            PastSession(session.id, session.started_at, teachers_words(session.messages[0].text))
-            for session in reversed(self._sessions)
-            if session.lesson.resolve() == lesson.resolve() and session.messages
-        ]
-
-    async def session_messages(self, session_id: str) -> list[Message]:
-        (session,) = [session for session in self._sessions if session.id == session_id]
-        return [
-            Message(message.author, teachers_words(message.text)) if message.author == "teacher" else message
-            for message in session.messages
-        ]
 
     async def account(self) -> Account:
         return self._account
@@ -181,45 +172,67 @@ class ScriptedAgent:
 class ScriptedSession:
     def __init__(
         self,
-        id: str,
         lesson: Path,
         turns: Iterator[list[Step]],
         delay: float,
-        started_at: datetime,
+        clock: Callable[[], datetime],
         on_turn: Callable[[], None],
         received: list[Received],
     ) -> None:
-        self.id = id
         self.lesson = lesson
-        self.started_at = started_at
-        self.messages: list[Message] = []
+        # What each turn showed, kept as Codex keeps a thread.
+        self.turns: list[PastTurn] = []
         self._turns = turns
         self._delay = delay
+        self._clock = clock
         self._on_turn = on_turn
         self._received = received
+        self._last_turn: str | None = None
+        self._stopping = False
 
-    async def send(self, text: str, attachments: Sequence[Path] = ()) -> AsyncIterator[Event]:
+    @property
+    def last_turn(self) -> str | None:
+        return self._last_turn
+
+    async def send(
+        self, text: str, attachments: Sequence[Path] = (), output_schema: dict | None = None
+    ) -> AsyncIterator[Event]:
         self._on_turn()
-        # Kept as Codex keeps it: the attachments join the text.
-        self.messages.append(Message("teacher", with_attachments(text, attachments)))
+        self._stopping = False
+        self._last_turn = f"turno-{len(self.turns) + 1}"
+        turn = PastTurn(self._last_turn, "1", self._clock(), text, [])
+        self.turns.append(turn)
         # Read now, as the Codex adapter does, since the files may change after the message.
-        self._received.append(Received(text, {path.name: path.read_text(encoding="utf-8") for path in attachments}))
-        turn = next(self._turns, None)
-        if turn is None:
-            yield AgentError("O roteiro do agente de demonstração acabou.")
+        self._received.append(
+            Received(text, {path.name: path.read_text(encoding="utf-8") for path in attachments}, output_schema)
+        )
+        steps = next(self._turns, None)
+        if steps is None:
+            yield self._kept(turn, AgentError("O roteiro do agente de demonstração acabou."))
             return
-        for step in turn:
+        for step in steps:
             await asyncio.sleep(self._delay)
+            if self._stopping:
+                yield self._kept(turn, AgentError("A resposta foi interrompida antes de terminar."))
+                return
             if isinstance(step, Exception):
                 raise step
             if isinstance(step, EditFile):
-                yield self._edit(step)
+                yield self._kept(turn, self._edit(step))
             elif isinstance(step, Produce):
                 self._target(step.path).write_bytes(step.content)
             else:
-                if isinstance(step, AssistantText):
-                    self.messages.append(Message("agent", step.text))
-                yield step
+                yield self._kept(turn, step)
+
+    async def stop(self) -> None:
+        self._stopping = True
+
+    @staticmethod
+    def _kept(turn: PastTurn, event: Event) -> Event:
+        # Codex keeps what the chat shows again, not what only shows while the turn runs.
+        if not isinstance(event, Working):
+            turn.events.append(event)
+        return event
 
     def _edit(self, edit: EditFile) -> FileChanged:
         target = self._target(edit.path)

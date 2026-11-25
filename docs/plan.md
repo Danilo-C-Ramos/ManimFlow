@@ -61,7 +61,20 @@ The teacher's changes go straight to `plano.yaml`, and the file stays valid. The
 
 The file is written back with its YAML comments and blank lines in place.
 
-**"Aprovar plano"** sends the agent one message with a diff of `plano.yaml` since the agent last wrote it (comments left out) and every comment, each with its state. Once the turn ends well, the comments it carried are removed from the file, since the agent has them. After a failed turn they stay, so the next approval sends them again. A new lesson's placeholder plan (states on the scaffold's empty `S0_Inicio` scene, no transitions) has no "Aprovar plano" button: the agent writes the first plan. When the agent rewrites `plano.yaml`, the cards redraw and the next diff starts from the agent's version. While the plan waits for the teacher, the message box offers "Aprovar plano" too ([the lesson screen](lesson-screen.md#the-message-box)), and an approval that went well marks the plan as approved ([versioning](versioning.md#the-approved-plan)).
+**"Aprovar plano"** sends the agent one message with a diff of `plano.yaml` since the agent last wrote it (comments left out) and every comment, each with its state, and the attachment `plano-aprovado.md`, which asks for the whole lesson in that turn: physics, scenes, the self-check loop and `CONTEXTO.md`. Without it, GPT-6 Luna answered the approval with what it would do and ended the turn. Once the turn ends well, the comments it carried are removed from the file, since the agent has them. After a failed turn they stay, so the next approval sends them again. A new lesson's placeholder plan (states on the scaffold's empty `S0_Inicio` scene, no transitions) has no "Aprovar plano" button: the agent writes the first plan. When the agent rewrites `plano.yaml`, the cards redraw and the next diff starts from the agent's version. While the plan waits for the teacher, the chat's plan card and the message box offer "Aprovar plano" too ([the lesson screen](lesson-screen.md#the-message-box)), and an approval that went well marks the plan as approved ([versioning](versioning.md#the-approved-plan)). The approval is recorded when the turn starts, so the agent finds the lesson in production, and undone on the server if the turn fails or never starts, so it holds even if the teacher left the page.
+
+## The plan turn
+
+Until the teacher first approves a lesson's plan, every message the teacher types is a *plan turn* (`plan_turn.py`): while the plan is the scaffold's placeholder, or the agent's plan waits for that first approval. GPT-6 Luna, which ChatGPT Free and Go get, described the plan in the chat without writing `plano.yaml`, and once said it would plan and ended the turn, so the cards and the approval never showed up. A plan turn doesn't depend on the agent following the steps in its instructions:
+
+- The message carries the attachment `pedido-de-plano.md`: what to answer, then the teacher's profile, the turma's instructions, `CONTEXTO.md` and the current `plano.yaml`. The agent needs no tool.
+- The turn asks Codex for a fixed format (`output_schema`), so the agent's last text must be JSON with `mensagem` (two or three sentences for the teacher), `plano` (the states and transitions, or `null` for a message that asks for no plan, such as a question) and `aprovado`.
+- ManimFlow writes `plano.yaml` from `plano`, adds an empty scene to `cenas.py` for each scene it names, and validates the plan. A plan that breaks the rules is reported in the chat and leaves the files as they were. The `comentarios` in the current plan go to the agent in the brief, and the plan it returns has none: they were handled.
+- The chat shows `mensagem`, then the plan card with "Aprovar e animar", and the "Plano" tab opens.
+- `aprovado` is true when the teacher approved the plan in words ("Plano aprovado, pode seguir"). Then ManimFlow approves it as the button would.
+- An answer that isn't a plan says so in the chat, and the plan stays as it was.
+
+After the first approval, messages go to the agent as they are, and the agent changes `plano.yaml` itself when a request needs it.
 
 ## Validation
 

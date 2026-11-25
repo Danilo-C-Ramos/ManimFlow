@@ -1,3 +1,4 @@
+import asyncio
 import os
 import shutil
 import subprocess
@@ -13,8 +14,13 @@ from nicegui.testing.user_simulation import user_simulation
 from manimflow.agent import AssistantText
 from manimflow.fake_agent import EditFile, ScriptedAgent
 from manimflow.home import app_root, lesson_url
-from manimflow.lessons import Library
+from manimflow.lessons import Library, Status, status
 from conftest import EXAMPLE, FIXTURES
+
+
+def subject(commit):
+    """The commit's message without the turn id that ends an agent turn's version."""
+    return commit.message.partition("\n\nTurno: ")[0]
 
 
 @pytest.fixture
@@ -105,7 +111,7 @@ async def test_lists_the_lessons_in_the_folder_with_last_edit_and_states(library
 def history(lesson):
     """The messages of the lesson's commits, newest first."""
     repo = pygit2.Repository(str(lesson / ".git"))
-    return [commit.message for commit in repo.walk(repo.head.target)]
+    return [subject(commit) for commit in repo.walk(repo.head.target)]
 
 
 def create_lesson(user, name):
@@ -351,7 +357,7 @@ async def test_the_teachers_changes_to_the_example_and_its_history_outlive_a_rel
         user.find(marker="message").type("muda tudo")
         user.find(marker="send").click()
         await user.should_see("Mudei.", retries=100)
-        await user.should_not_see("O agente está trabalhando…", retries=100)
+        await user.should_not_see(marker="progress", retries=100)
 
     # A new launch gets a new Library on the same folder.
     relaunched = Library(library.data)
@@ -361,7 +367,7 @@ async def test_the_teachers_changes_to_the_example_and_its_history_outlive_a_rel
     example = relaunched.example()
     assert (example / "cenas.py").read_text(encoding="utf-8") == "# mudado\n"
     repo = pygit2.Repository(str(example / ".git"))
-    assert repo[repo.head.target].message == "Pedido: muda tudo"
+    assert subject(repo[repo.head.target]) == "Pedido: muda tudo"
 
 
 async def test_the_lesson_screen_lists_the_lessons_and_switches_to_another(library):
@@ -387,3 +393,119 @@ async def test_a_new_lesson_can_be_started_from_the_lesson_screen(library):
         create_lesson(user, "Aula 11 - Óptica")
 
         await user.should_see(marker="current-lesson", content="Aula 11 - Óptica", retries=100)
+
+
+async def test_the_example_explains_itself_and_its_chat_is_about_it(library):
+    agent = ScriptedAgent([[AssistantText("É sobre relatividade.")]])
+    async with user_simulation(root=app_root(agent, library)) as user:
+        await user.open("/exemplo")
+        await user.should_see("Esta é a aula de exemplo")
+
+        user.find(content="Deixe a transição S2 → S2b mais lenta").click()
+        with user:
+            (box,) = user.find(marker="message").elements
+            assert box.value == "Deixe a transição S2 → S2b mais lenta"
+        box_text = "Do que trata esta aula?"
+        user.find(marker="message").clear().type(box_text)
+        user.find(marker="send").click()
+        await user.should_see("É sobre relatividade.", retries=100)
+
+    (message,) = agent.received
+    context = message.attachments["contexto-da-aula.md"]
+    assert "Aula: Relatividade - herói e espelho" in context
+    assert "aula de exemplo que vem com o ManimFlow" in context
+    assert "S2b · Instante da Reflexão" in context
+
+
+async def test_the_example_opens_with_every_state_rendered(library):
+    async with open_home(library) as user:
+        await user.open("/exemplo")
+        await user.should_see(marker="message")
+        await user.should_not_see("Ainda não renderizado")
+    assert status(library.example()) == Status.READY
+
+
+async def test_an_example_copy_from_before_gets_the_previews_it_lacks(library):
+    example = library.example()
+    shutil.rmtree(example / "saida")
+    (example / "saida" / "previa" / "png").mkdir(parents=True)
+    mine = example / "saida" / "previa" / "png" / "S1_EixosHeroi.png"
+    mine.write_bytes(b"minha")
+
+    library.example()
+
+    assert mine.read_bytes() == b"minha"
+    assert (example / "saida" / "previa" / "png" / "S0_Base.png").is_file()
+
+
+class SlowArchive(ScriptedAgent):
+    """Puts a lesson's conversation away slowly, as Codex does with many threads."""
+
+    async def archive(self, lesson):
+        await asyncio.sleep(1.0)
+        await super().archive(lesson)
+
+
+async def test_restaurar_exemplo_brings_the_original_back_and_starts_its_conversation_over(library):
+    agent = SlowArchive([[EditFile("cenas.py", "# mudado\n"), AssistantText("Mudei.")]])
+    async with user_simulation(root=app_root(agent, library)) as user:
+        await user.open("/exemplo")
+        await user.should_see(marker="message")
+        user.find(marker="message").type("muda tudo")
+        user.find(marker="send").click()
+        await user.should_see("Mudei.", retries=100)
+        await user.should_not_see(marker="progress", retries=100)
+
+        user.find(marker="reset-example").click()
+        user.find(marker="confirm-reset-example").click()
+
+        await user.should_see("Esta é a aula de exemplo", retries=100)
+        await user.should_not_see("Mudei.", retries=100)
+    example = library.example()
+    assert agent.archived == [example]
+    assert (example / "cenas.py").read_text(encoding="utf-8") == (EXAMPLE / "cenas.py").read_text(encoding="utf-8")
+
+
+async def test_signed_out_the_sidebar_and_the_settings_offer_to_sign_in(library):
+    agent = ScriptedAgent([], logged_in=False)
+    async with user_simulation(root=app_root(agent, library)) as user:
+        await user.open("/")
+        await user.should_see(marker="sidebar-sign-in", retries=50)
+
+        user.find(marker="sidebar-sign-in").click()
+        await user.should_see(marker="signed-out")
+        await user.should_see(marker="api-key")
+        await user.should_not_see("Sair")
+
+        user.find(marker="sign-in-chatgpt").click()
+
+        await user.should_see(marker="usage", retries=50)
+    assert (await agent.account()).logged_in
+
+
+async def test_signing_out_in_the_settings_leaves_a_way_back_in(library):
+    agent = ScriptedAgent([])
+    async with user_simulation(root=app_root(agent, library)) as user:
+        await user.open("/")
+        user.find(marker="open-settings").click()
+        await user.should_see("Sair")
+        user.find("Sair").click()
+
+        await user.should_see(marker="sidebar-sign-in", retries=50)
+        user.find(marker="open-settings").click()
+        await user.should_see(marker="sign-in-chatgpt")
+        await user.should_not_see("Sair")
+
+
+async def test_signing_in_on_a_lesson_page_brings_the_sidebar_along(library):
+    lesson = add_lesson(library.folder, "Aula 09", datetime(2026, 10, 5))
+    agent = ScriptedAgent([], logged_in=False)
+    async with user_simulation(root=app_root(agent, library)) as user:
+        await user.open(lesson_url(lesson.name))
+        await user.should_see(marker="sidebar-sign-in", retries=50)
+
+        user.find(marker="sign-in-chatgpt").click()
+
+        await user.should_see(marker="message", retries=50)
+        await user.should_see(marker="usage", retries=50)
+        await user.should_not_see(marker="sidebar-sign-in")
