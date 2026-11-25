@@ -8,11 +8,13 @@ from conftest import EXAMPLE
 def launch(monkeypatch, tmp_path, *args):
     """Runs `manimflow` without starting a server and returns what it passed to ui.run.
 
-    ManimFlow's own folder is `tmp_path / "dados" / "ManimFlow"`.
+    ManimFlow's own folder is `tmp_path / "dados" / "ManimFlow"`, and the lessons go
+    into `tmp_path / "Documentos"`, not the teacher's own.
     """
     calls = []
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "dados"))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "dados"))
+    monkeypatch.setattr("manimflow.lessons.documents_dir", lambda: tmp_path / "Documentos")
     with monkeypatch.context() as patch:
         patch.setattr(ui, "run", lambda root, **options: calls.append((root, options)))
         assert main(list(args)) == 0
@@ -41,7 +43,9 @@ async def test_the_app_runs_codex_in_its_own_home_and_asks_to_sign_in(monkeypatc
 
     async with user_simulation(root=root) as user:
         await user.open("/exemplo")
-        await user.should_see("Entrar com o ChatGPT")
+        # The page shows its header and sidebar first, and the sign-in once Codex has
+        # started, which takes seconds on Windows.
+        await user.should_see("Entrar com o ChatGPT", retries=100)
 
     assert (tmp_path / "dados" / "ManimFlow" / "codex").is_dir()
 
