@@ -125,6 +125,9 @@ body {
 .mf-panels { flex: 1; min-height: 0; }
 .mf-panels > .q-panel, .mf-panels .q-tab-panel { height: 100%; padding: 0; }
 .mf-pane { height: calc(100vh - 52px - 46px); }
+/* Quasar lets a scroll area's content grow to its widest child, such as the filmstrip, which
+   pushed the stage off the pane. The pane's width holds instead; the filmstrip scrolls itself. */
+.mf-pane > .q-scrollarea__container > .q-scrollarea__content { width: 100%; }
 
 /* ── Preview: stage and filmstrip ── */
 .mf-stagecol { padding: 12px 18px; gap: 8px; width: 100%; }
